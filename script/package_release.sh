@@ -5,10 +5,11 @@ APP_NAME="MyDesk"
 BUNDLE_ID="studio.qiushan.mydesk"
 MIN_SYSTEM_VERSION="14.0"
 COPYRIGHT="Copyright © 2026 Qiushan Huang. All rights reserved."
-BUILD_NUMBER="${BUILD_NUMBER:-100}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="$(tr -d '[:space:]' <"$ROOT_DIR/VERSION")"
+IFS=. read -r VERSION_MAJOR VERSION_MINOR VERSION_PATCH <<<"$VERSION"
+BUILD_NUMBER="${BUILD_NUMBER:-$((VERSION_MAJOR * 10000 + VERSION_MINOR * 100 + VERSION_PATCH))}"
 RELEASE_NAME="$APP_NAME-v$VERSION-macOS"
 RELEASE_DIR="$ROOT_DIR/dist/release/$RELEASE_NAME"
 PAYLOAD_DIR="$RELEASE_DIR/payload"
@@ -21,6 +22,7 @@ APP_RESOURCES="$APP_CONTENTS/Resources"
 APP_BINARY="$APP_MACOS/$APP_NAME"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
 SOURCE_RESOURCES="$ROOT_DIR/Sources/MyDesk/Resources"
+RELEASE_NOTES_SOURCE="$ROOT_DIR/docs/releases/v$VERSION.md"
 
 if [[ -e "$RELEASE_DIR" ]]; then
   echo "Release directory already exists: $RELEASE_DIR" >&2
@@ -107,12 +109,15 @@ System Settings > Privacy & Security and allow $APP_NAME, or right-click the app
 and choose Open.
 TXT
 
-cat >"$ARTIFACT_DIR/RELEASE-NOTES.md" <<TXT
+if [[ -f "$RELEASE_NOTES_SOURCE" ]]; then
+  cp "$RELEASE_NOTES_SOURCE" "$ARTIFACT_DIR/RELEASE-NOTES.md"
+else
+  cat >"$ARTIFACT_DIR/RELEASE-NOTES.md" <<TXT
 # $APP_NAME $VERSION
 
-Initial public macOS release.
+macOS release package for MyDesk.
 
-## Highlights
+## Current Features
 
 - Native macOS workbench for folders, files, snippets, and visual workflow maps.
 - Workspace canvas with resource cards, notes, organization frames, arrow links, and animated flow lines.
@@ -126,6 +131,7 @@ Initial public macOS release.
 - License: MIT.
 - $COPYRIGHT
 TXT
+fi
 
 (
   cd "$ARTIFACT_DIR"

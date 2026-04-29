@@ -320,6 +320,20 @@ public enum CanvasViewportProjection {
             height: height * zoom
         )
     }
+
+    public static func canvasPoint(
+        screenX: Double,
+        screenY: Double,
+        zoom: Double,
+        viewportX: Double,
+        viewportY: Double
+    ) -> CanvasEdgePoint {
+        let safeZoom = max(zoom, 0.01)
+        return CanvasEdgePoint(
+            x: (screenX - viewportX) / safeZoom,
+            y: (screenY - viewportY) / safeZoom
+        )
+    }
 }
 
 public enum CanvasEdgeFlowPhase {

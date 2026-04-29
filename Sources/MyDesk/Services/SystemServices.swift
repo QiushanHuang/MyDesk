@@ -334,7 +334,7 @@ struct ImportExportService {
                 CanvasNodeRecord(id: $0.id, canvasId: $0.canvasId, title: $0.title, body: $0.body, nodeType: $0.nodeTypeRaw, objectType: $0.objectType, objectId: $0.objectId, x: $0.x, y: $0.y, width: $0.width, height: $0.height, collapsed: $0.collapsed, parentNodeId: $0.parentNodeId, zIndex: $0.zIndex, locked: $0.locked, style: $0.styleRaw, accentColor: $0.accentColorRaw, createdAt: $0.createdAt, updatedAt: $0.updatedAt)
             },
             edges: edges.map {
-                CanvasEdgeRecord(id: $0.id, canvasId: $0.canvasId, sourceNodeId: $0.sourceNodeId, targetNodeId: $0.targetNodeId, label: $0.label, style: $0.style, sourceArrow: $0.sourceArrowRaw, targetArrow: $0.targetArrowRaw, animated: $0.animated, animationTheme: $0.animationThemeRaw, createdAt: $0.createdAt, updatedAt: $0.updatedAt)
+                CanvasEdgeRecord(id: $0.id, canvasId: $0.canvasId, sourceNodeId: $0.sourceNodeId, targetNodeId: $0.targetNodeId, label: $0.label, style: $0.style, sourceArrow: $0.sourceArrowRaw, targetArrow: $0.targetArrowRaw, animated: $0.animated, animationTheme: $0.animationThemeRaw, controlPointX: $0.controlPointX, controlPointY: $0.controlPointY, createdAt: $0.createdAt, updatedAt: $0.updatedAt)
             },
             aliases: aliases.map {
                 AliasRecord(id: $0.id, sourceObjectType: $0.sourceObjectType, sourceObjectId: $0.sourceObjectId, aliasDisplayPath: $0.aliasDisplayPath, status: $0.statusRaw, createdAt: $0.createdAt)

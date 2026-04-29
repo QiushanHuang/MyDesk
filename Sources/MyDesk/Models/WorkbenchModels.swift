@@ -326,10 +326,12 @@ final class CanvasEdgeModel {
     var targetArrowRaw: String = "arrow"
     var animated: Bool = true
     var animationThemeRaw: String = "blue"
+    var controlPointX: Double?
+    var controlPointY: Double?
     var createdAt: Date
     var updatedAt: Date
 
-    init(id: String = UUID().uuidString, canvasId: String, sourceNodeId: String, targetNodeId: String, label: String = "", style: String = "default", sourceArrowRaw: String = "none", targetArrowRaw: String = "arrow", animated: Bool = true, animationThemeRaw: String = "blue", createdAt: Date = .now, updatedAt: Date = .now) {
+    init(id: String = UUID().uuidString, canvasId: String, sourceNodeId: String, targetNodeId: String, label: String = "", style: String = "default", sourceArrowRaw: String = "none", targetArrowRaw: String = "arrow", animated: Bool = true, animationThemeRaw: String = "blue", controlPointX: Double? = nil, controlPointY: Double? = nil, createdAt: Date = .now, updatedAt: Date = .now) {
         self.id = id
         self.canvasId = canvasId
         self.sourceNodeId = sourceNodeId
@@ -340,6 +342,8 @@ final class CanvasEdgeModel {
         self.targetArrowRaw = targetArrowRaw
         self.animated = animated
         self.animationThemeRaw = animationThemeRaw
+        self.controlPointX = controlPointX
+        self.controlPointY = controlPointY
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }

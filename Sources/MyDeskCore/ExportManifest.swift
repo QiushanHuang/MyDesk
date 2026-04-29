@@ -401,6 +401,8 @@ public struct CanvasEdgeRecord: Codable, Equatable, Identifiable {
         case targetArrow
         case animated
         case animationTheme
+        case controlPointX
+        case controlPointY
         case createdAt
         case updatedAt
     }
@@ -415,10 +417,12 @@ public struct CanvasEdgeRecord: Codable, Equatable, Identifiable {
     public var targetArrow: String
     public var animated: Bool
     public var animationTheme: String
+    public var controlPointX: Double?
+    public var controlPointY: Double?
     public var createdAt: Date
     public var updatedAt: Date
 
-    public init(id: String, canvasId: String, sourceNodeId: String, targetNodeId: String, label: String, style: String = "default", sourceArrow: String = "none", targetArrow: String = "arrow", animated: Bool = true, animationTheme: String = "blue", createdAt: Date = Date(timeIntervalSince1970: 0), updatedAt: Date = Date(timeIntervalSince1970: 0)) {
+    public init(id: String, canvasId: String, sourceNodeId: String, targetNodeId: String, label: String, style: String = "default", sourceArrow: String = "none", targetArrow: String = "arrow", animated: Bool = true, animationTheme: String = "blue", controlPointX: Double? = nil, controlPointY: Double? = nil, createdAt: Date = Date(timeIntervalSince1970: 0), updatedAt: Date = Date(timeIntervalSince1970: 0)) {
         self.id = id
         self.canvasId = canvasId
         self.sourceNodeId = sourceNodeId
@@ -429,6 +433,8 @@ public struct CanvasEdgeRecord: Codable, Equatable, Identifiable {
         self.targetArrow = targetArrow
         self.animated = animated
         self.animationTheme = animationTheme
+        self.controlPointX = controlPointX
+        self.controlPointY = controlPointY
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -446,6 +452,8 @@ public struct CanvasEdgeRecord: Codable, Equatable, Identifiable {
         targetArrow = try container.decodeIfPresent(String.self, forKey: .targetArrow) ?? "arrow"
         animated = try container.decodeIfPresent(Bool.self, forKey: .animated) ?? true
         animationTheme = try container.decodeIfPresent(String.self, forKey: .animationTheme) ?? "blue"
+        controlPointX = try container.decodeIfPresent(Double.self, forKey: .controlPointX)
+        controlPointY = try container.decodeIfPresent(Double.self, forKey: .controlPointY)
         createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? fallbackDate
         updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? fallbackDate
     }

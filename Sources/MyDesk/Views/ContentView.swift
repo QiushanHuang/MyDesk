@@ -815,7 +815,7 @@ struct ContentView: View {
             guard let canvasId = canvasMap[record.canvasId],
                   let sourceId = nodeMap[record.sourceNodeId],
                   let targetId = nodeMap[record.targetNodeId] else { continue }
-            modelContext.insert(CanvasEdgeModel(canvasId: canvasId, sourceNodeId: sourceId, targetNodeId: targetId, label: record.label, style: record.style, sourceArrowRaw: record.sourceArrow, targetArrowRaw: record.targetArrow, animated: record.animated, animationThemeRaw: record.animationTheme, createdAt: record.createdAt, updatedAt: record.updatedAt))
+            modelContext.insert(CanvasEdgeModel(canvasId: canvasId, sourceNodeId: sourceId, targetNodeId: targetId, label: record.label, style: record.style, sourceArrowRaw: record.sourceArrow, targetArrowRaw: record.targetArrow, animated: record.animated, animationThemeRaw: record.animationTheme, controlPointX: record.controlPointX, controlPointY: record.controlPointY, createdAt: record.createdAt, updatedAt: record.updatedAt))
         }
 
         for record in manifest.aliases {

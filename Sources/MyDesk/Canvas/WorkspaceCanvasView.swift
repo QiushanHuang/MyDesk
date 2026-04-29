@@ -31,6 +31,7 @@ private struct CanvasEdgeSegment: Identifiable {
     let id: String
     let start: CGPoint
     let end: CGPoint
+    let control: CGPoint?
 }
 
 enum CanvasGlowTheme: String, CaseIterable, Identifiable {
@@ -98,7 +99,8 @@ private struct CanvasRenderSnapshot {
 
     func edgeSegments(
         targetClearance: Double,
-        rectFor: (CanvasNodeModel) -> CanvasFrameRect
+        rectFor: (CanvasNodeModel) -> CanvasFrameRect,
+        controlPointFor: (CanvasEdgeModel) -> CGPoint?
     ) -> [CanvasEdgeSegment] {
         visibleEdges.compactMap { edge in
             guard let source = nodeById[edge.sourceNodeId],
@@ -109,7 +111,8 @@ private struct CanvasRenderSnapshot {
             return CanvasEdgeSegment(
                 id: edge.id,
                 start: CGPoint(x: anchors.start.x, y: anchors.start.y),
-                end: CGPoint(x: anchors.end.x, y: anchors.end.y)
+                end: CGPoint(x: anchors.end.x, y: anchors.end.y),
+                control: controlPointFor(edge)
             )
         }
     }
@@ -141,6 +144,8 @@ struct WorkspaceCanvasView: View {
     @State private var transientFrameSizes: [String: CGSize] = [:]
     @State private var resizingFrameNodeId: String?
     @State private var isCanvasInspectorVisible = false
+    @State private var edgeControlDragStart: [String: CGPoint] = [:]
+    @State private var transientEdgeControlPoints: [String: CGPoint] = [:]
 
     private var zoom: CGFloat {
         CGFloat(effectiveZoom)
@@ -428,7 +433,11 @@ struct WorkspaceCanvasView: View {
     private var canvasSurface: some View {
         GeometryReader { proxy in
             let snapshot = renderSnapshot
-            let edgeSegments = snapshot.edgeSegments(targetClearance: CanvasNodeMetrics.edgeTargetClearance, rectFor: screenRect(for:))
+            let edgeSegments = snapshot.edgeSegments(
+                targetClearance: CanvasNodeMetrics.edgeTargetClearance,
+                rectFor: screenRect(for:),
+                controlPointFor: screenControlPoint(for:)
+            )
             ZStack(alignment: .topLeading) {
                 canvasBackground
 
@@ -445,6 +454,8 @@ struct WorkspaceCanvasView: View {
                         onCopy: { performCardButtonAction(node) { copyNodePayload(node) } },
                         onConnect: { performCardButtonAction(node) { connectButtonTapped(node) } },
                         onDelete: { performCardButtonAction(node) { delete(node) } },
+                        onTitleChange: { updateNodeTitle(node, to: $0) },
+                        onNoteChange: { updateNodeBody(node, to: $0) },
                         onResizeChanged: { resizeFrame(node, screenTranslation: $0, commit: false) },
                         onResizeEnded: { resizeFrame(node, screenTranslation: $0, commit: true) }
                     )
@@ -461,6 +472,7 @@ struct WorkspaceCanvasView: View {
                     FlowingArrowEdge(
                         start: segment.start,
                         end: segment.end,
+                        control: transientEdgeControlPoints[segment.id] ?? segment.control,
                         theme: glowTheme,
                         isAnimated: shouldAnimateGlow,
                         canvasSize: proxy.size
@@ -484,7 +496,9 @@ struct WorkspaceCanvasView: View {
                         onCopy: { performCardButtonAction(node) { copyNodePayload(node) } },
                         onConnect: { performCardButtonAction(node) { connectButtonTapped(node) } },
                         onToggleNote: { performCardButtonAction(node) { toggleNote(for: node) } },
-                        onDelete: { performCardButtonAction(node) { delete(node) } }
+                        onDelete: { performCardButtonAction(node) { delete(node) } },
+                        onTitleChange: { updateNodeTitle(node, to: $0) },
+                        onNoteChange: { updateNodeBody(node, to: $0) }
                     )
                     .frame(width: nodeSize(for: node).width * Double(zoom), height: nodeSize(for: node).height * Double(zoom))
                     .position(screenPoint(for: node))
@@ -502,11 +516,19 @@ struct WorkspaceCanvasView: View {
                     FlowingArrowHead(
                         start: segment.start,
                         end: segment.end,
+                        control: transientEdgeControlPoints[segment.id] ?? segment.control,
                         theme: glowTheme,
                         isAnimated: shouldAnimateGlow,
                         canvasSize: proxy.size
                     )
                     .zIndex(2.7)
+                }
+
+                ForEach(edgeSegments) { segment in
+                    EdgeControlHandle(isCustom: (transientEdgeControlPoints[segment.id] ?? segment.control) != nil)
+                        .position(edgeControlPoint(for: segment))
+                        .highPriorityGesture(edgeControlDragGesture(for: segment))
+                        .zIndex(3.1)
                 }
 
                 if let selectionRect {
@@ -624,6 +646,61 @@ struct WorkspaceCanvasView: View {
     private func frameRect(for node: CanvasNodeModel) -> CanvasFrameRect {
         let size = nodeSize(for: node)
         return CanvasFrameRect(id: node.id, x: node.x, y: node.y, width: size.width, height: size.height)
+    }
+
+    private func screenControlPoint(for edge: CanvasEdgeModel) -> CGPoint? {
+        guard let x = edge.controlPointX, let y = edge.controlPointY else { return nil }
+        return CGPoint(
+            x: x * effectiveZoom + effectiveViewportX,
+            y: y * effectiveZoom + effectiveViewportY
+        )
+    }
+
+    private func edgeControlPoint(for segment: CanvasEdgeSegment) -> CGPoint {
+        transientEdgeControlPoints[segment.id] ?? EdgePathFactory.handlePoint(start: segment.start, end: segment.end, control: segment.control)
+    }
+
+    private func edgeControlDragGesture(for segment: CanvasEdgeSegment) -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                if edgeControlDragStart[segment.id] == nil {
+                    edgeControlDragStart[segment.id] = edgeControlPoint(for: segment)
+                }
+                guard let start = edgeControlDragStart[segment.id] else { return }
+                transientEdgeControlPoints[segment.id] = CGPoint(
+                    x: start.x + value.translation.width,
+                    y: start.y + value.translation.height
+                )
+            }
+            .onEnded { value in
+                let distance = hypot(value.translation.width, value.translation.height)
+                guard distance >= 2 || segment.control != nil else {
+                    transientEdgeControlPoints[segment.id] = nil
+                    edgeControlDragStart[segment.id] = nil
+                    return
+                }
+                let start = edgeControlDragStart[segment.id] ?? edgeControlPoint(for: segment)
+                let screenPoint = CGPoint(
+                    x: start.x + value.translation.width,
+                    y: start.y + value.translation.height
+                )
+                let canvasPoint = CanvasViewportProjection.canvasPoint(
+                    screenX: Double(screenPoint.x),
+                    screenY: Double(screenPoint.y),
+                    zoom: effectiveZoom,
+                    viewportX: effectiveViewportX,
+                    viewportY: effectiveViewportY
+                )
+                if let edge = visibleEdges.first(where: { $0.id == segment.id }) {
+                    edge.controlPointX = canvasPoint.x
+                    edge.controlPointY = canvasPoint.y
+                    edge.updatedAt = .now
+                    try? modelContext.save()
+                    onStatus("Adjusted link bend")
+                }
+                transientEdgeControlPoints[segment.id] = nil
+                edgeControlDragStart[segment.id] = nil
+            }
     }
 
     private var selectionSummary: String {
@@ -959,6 +1036,21 @@ struct WorkspaceCanvasView: View {
         }
     }
 
+    private func updateNodeTitle(_ node: CanvasNodeModel, to title: String) {
+        guard node.nodeType == .note || node.nodeType == .groupFrame else { return }
+        guard node.title != title else { return }
+        node.title = title
+        node.updatedAt = .now
+        try? modelContext.save()
+    }
+
+    private func updateNodeBody(_ node: CanvasNodeModel, to body: String) {
+        guard node.body != body else { return }
+        node.body = body
+        node.updatedAt = .now
+        try? modelContext.save()
+    }
+
     private func createAliasForSelectedNode() {
         guard let resource = selectedResource else { return }
         let resolved = BookmarkService().resolveBookmark(resource.securityScopedBookmarkData, fallbackPath: resource.lastResolvedPath)
@@ -1196,6 +1288,8 @@ struct CanvasNodeCard: View {
     let onConnect: () -> Void
     let onToggleNote: () -> Void
     let onDelete: () -> Void
+    let onTitleChange: (String) -> Void
+    let onNoteChange: (String) -> Void
     @State private var feedback: String?
 
     var body: some View {
@@ -1235,17 +1329,26 @@ struct CanvasNodeCard: View {
                     .help("Delete card")
                 }
 
-                Text(titleText)
-                    .font(.headline)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity, minHeight: 34, alignment: .center)
+                if canRenameTitle {
+                    TextField("Title", text: titleBinding)
+                        .textFieldStyle(.plain)
+                        .font(.headline)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, minHeight: 34, alignment: .center)
+                } else {
+                    Text(titleText)
+                        .font(.headline)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity, minHeight: 34, alignment: .center)
+                }
                 Spacer()
 
                 Divider()
                     .opacity(0.45)
-                Button(action: onToggleNote) {
-                    VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Button(action: onToggleNote) {
                         HStack(spacing: 4) {
                             Image(systemName: node.collapsed ? "chevron.right" : "chevron.down")
                                 .font(.caption2)
@@ -1253,17 +1356,18 @@ struct CanvasNodeCard: View {
                                 .font(.caption.bold())
                             Spacer()
                         }
-                        if !node.collapsed {
-                            Text(node.body.isEmpty ? "No description yet." : node.body)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(3)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
+                        .contentShape(Rectangle())
                     }
-                    .contentShape(Rectangle())
+                    .buttonStyle(.plain)
+                    if !node.collapsed {
+                        TextField("No description yet.", text: noteBinding, axis: .vertical)
+                            .textFieldStyle(.plain)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1...3)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
-                .buttonStyle(.plain)
             }
             .padding(10)
             .background(.regularMaterial)
@@ -1339,6 +1443,24 @@ struct CanvasNodeCard: View {
             return resource.displayName
         }
         return node.title
+    }
+
+    private var canRenameTitle: Bool {
+        node.nodeType == .note
+    }
+
+    private var titleBinding: Binding<String> {
+        Binding(
+            get: { node.title },
+            set: { onTitleChange($0) }
+        )
+    }
+
+    private var noteBinding: Binding<String> {
+        Binding(
+            get: { node.body },
+            set: { onNoteChange($0) }
+        )
     }
 
     private var subtitle: String {
@@ -1445,6 +1567,8 @@ struct CanvasFrameCard: View {
     let onCopy: () -> Void
     let onConnect: () -> Void
     let onDelete: () -> Void
+    let onTitleChange: (String) -> Void
+    let onNoteChange: (String) -> Void
     let onResizeChanged: (CGSize) -> Void
     let onResizeEnded: (CGSize) -> Void
     @State private var feedback: String?
@@ -1455,7 +1579,8 @@ struct CanvasFrameCard: View {
                 HStack(spacing: 8) {
                     Image(systemName: "rectangle.dashed")
                         .foregroundStyle(.secondary)
-                    Text(node.title)
+                    TextField("Frame name", text: titleBinding)
+                        .textFieldStyle(.plain)
                         .font(.headline)
                         .lineLimit(1)
                     Spacer()
@@ -1481,11 +1606,11 @@ struct CanvasFrameCard: View {
                     .buttonStyle(CardIconButtonStyle())
                 }
 
-                Text(node.body.isEmpty ? "No frame note yet." : node.body)
+                TextField("No frame note yet.", text: noteBinding, axis: .vertical)
+                    .textFieldStyle(.plain)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(5)
-                    .textSelection(.enabled)
+                    .lineLimit(3...6)
                 Spacer()
             }
             .padding(12)
@@ -1554,6 +1679,20 @@ struct CanvasFrameCard: View {
         return isSelected ? .accentColor : Color.secondary.opacity(0.45)
     }
 
+    private var titleBinding: Binding<String> {
+        Binding(
+            get: { node.title },
+            set: { onTitleChange($0) }
+        )
+    }
+
+    private var noteBinding: Binding<String> {
+        Binding(
+            get: { node.body },
+            set: { onNoteChange($0) }
+        )
+    }
+
     private func triggerFeedback(_ message: String, action: () -> Void) {
         action()
         withAnimation(.easeOut(duration: 0.12)) {
@@ -1572,6 +1711,7 @@ struct CanvasFrameCard: View {
 struct FlowingArrowEdge: View {
     let start: CGPoint
     let end: CGPoint
+    let control: CGPoint?
     let theme: CanvasGlowTheme
     let isAnimated: Bool
     let canvasSize: CGSize
@@ -1602,7 +1742,7 @@ struct FlowingArrowEdge: View {
 
     private func edgeCanvas(dashPhase: Double?) -> some View {
         Canvas { context, _ in
-            let curve = EdgePathFactory.curve(start: start, end: end)
+            let curve = EdgePathFactory.curve(start: start, end: end, control: control)
 
             context.stroke(
                 curve,
@@ -1625,13 +1765,14 @@ struct FlowingArrowEdge: View {
 struct FlowingArrowHead: View {
     let start: CGPoint
     let end: CGPoint
+    let control: CGPoint?
     let theme: CanvasGlowTheme
     let isAnimated: Bool
     let canvasSize: CGSize
 
     var body: some View {
         Canvas { context, _ in
-            let arrow = EdgePathFactory.arrowHead(start: start, end: end)
+            let arrow = EdgePathFactory.arrowHead(start: control ?? start, end: end)
             context.fill(arrow, with: .color(arrowColor))
         }
         .frame(width: canvasSize.width, height: canvasSize.height, alignment: .topLeading)
@@ -1643,6 +1784,23 @@ struct FlowingArrowHead: View {
             return Color.primary.opacity(0.72)
         }
         return (theme == .blue ? Color.blue : Color.accentColor).opacity(1)
+    }
+}
+
+struct EdgeControlHandle: View {
+    let isCustom: Bool
+
+    var body: some View {
+        Circle()
+            .fill(isCustom ? Color.blue : Color(nsColor: .controlBackgroundColor))
+            .frame(width: 13, height: 13)
+            .overlay {
+                Circle()
+                    .stroke(Color.blue.opacity(0.95), lineWidth: 2)
+            }
+            .shadow(color: .black.opacity(0.16), radius: 2, y: 1)
+            .contentShape(Circle())
+            .help("Drag to bend this link")
     }
 }
 
@@ -1665,9 +1823,26 @@ private struct FrameResizeHandle: View {
 }
 
 private enum EdgePathFactory {
-    static func curve(start: CGPoint, end: CGPoint) -> Path {
+    static func curve(start: CGPoint, end: CGPoint, control: CGPoint? = nil) -> Path {
         var path = Path()
         path.move(to: start)
+        if let control {
+            appendAutoCurve(to: control, from: start, in: &path)
+            appendAutoCurve(to: end, from: control, in: &path)
+            return path
+        }
+        appendAutoCurve(to: end, from: start, in: &path)
+        return path
+    }
+
+    static func handlePoint(start: CGPoint, end: CGPoint, control: CGPoint?) -> CGPoint {
+        if let control {
+            return control
+        }
+        return CGPoint(x: (start.x + end.x) / 2, y: (start.y + end.y) / 2)
+    }
+
+    private static func appendAutoCurve(to end: CGPoint, from start: CGPoint, in path: inout Path) {
         if usesHorizontalRoute(start: start, end: end) {
             let midX = (start.x + end.x) / 2
             path.addCurve(
@@ -1683,7 +1858,6 @@ private enum EdgePathFactory {
                 control2: CGPoint(x: end.x, y: midY)
             )
         }
-        return path
     }
 
     static func arrowHead(start: CGPoint, end: CGPoint) -> Path {

@@ -286,6 +286,37 @@ final class CoreBehaviorTests: XCTestCase {
         XCTAssertEqual(anchors.end.x, target.x, accuracy: 0.0001)
     }
 
+    func testCanvasViewportProjectionConvertsScreenPointBackToCanvasPoint() {
+        let point = CanvasViewportProjection.canvasPoint(
+            screenX: 220,
+            screenY: 146,
+            zoom: 0.5,
+            viewportX: 20,
+            viewportY: -4
+        )
+
+        XCTAssertEqual(point.x, 400, accuracy: 0.0001)
+        XCTAssertEqual(point.y, 300, accuracy: 0.0001)
+    }
+
+    func testCanvasEdgeRecordKeepsCustomControlPoint() throws {
+        let edge = CanvasEdgeRecord(
+            id: "edge",
+            canvasId: "canvas",
+            sourceNodeId: "source",
+            targetNodeId: "target",
+            label: "",
+            controlPointX: 320,
+            controlPointY: 180
+        )
+
+        let encoded = try JSONEncoder().encode(edge)
+        let decoded = try JSONDecoder().decode(CanvasEdgeRecord.self, from: encoded)
+
+        XCTAssertEqual(decoded.controlPointX, 320)
+        XCTAssertEqual(decoded.controlPointY, 180)
+    }
+
     func testCanvasEdgeFlowPhaseWrapsWithoutStatefulAnimation() {
         XCTAssertEqual(CanvasEdgeFlowPhase.dashPhase(elapsed: 0, duration: 2, cycleLength: 180), 0)
         XCTAssertEqual(CanvasEdgeFlowPhase.dashPhase(elapsed: 1, duration: 2, cycleLength: 180), -90)

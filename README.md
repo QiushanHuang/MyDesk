@@ -47,10 +47,35 @@ Instead of forcing every project into a plain file tree or a long notes document
 | --- | --- |
 | Workspace Management | Create, rename, delete, pin, sort, and reopen workspaces. |
 | Resource Management | Pin files and folders, preserve original names, add custom display names, copy paths, and route Finder actions correctly. |
-| Canvas System | Drop placement, auto-arrange, zoom scaling, visible edge anchors, arrow rendering, animated relationship flow, frames, and grouped movement. |
-| Snippets | Store reusable text and command assets with metadata and workspace scope. |
-| Data Portability | Export and import schema-versioned workspace manifests with compatibility for older records. |
+| Canvas System | Drop placement, auto-arrange, zoom scaling, visible edge anchors, arrow rendering, animated relationship flow, editable notes, editable organization frames, draggable link bends, and grouped movement. |
+| Snippets | Store reusable prompts, commands, text assets, and operational references with metadata and workspace scope. |
+| Data Portability | Export and import schema-versioned workspace manifests with compatibility for older records, including custom canvas link bends. |
 | Core Reliability | Core ordering, layout, export, shell quoting, and Finder routing logic are covered by XCTest. |
+
+## Current Features
+
+MyDesk currently includes:
+
+- Home dashboard for reopening active workspaces and pinned resources.
+- Workspace creation, rename, delete, pinning, sorting, and quick reopening.
+- Global Library for reusable folder and file sources.
+- Pinned Folders and Pinned Files sections for fast access to important resources.
+- Finder integration for opening folders, revealing files, copying paths, and creating aliases after confirmation.
+- Snippet Library for reusable prompts, commands, notes, and text blocks.
+- Workspace Canvas with resource cards, note cards, organization frames, zoom controls, box selection, auto-arrange, alignment, arrow links, and animated flow lines.
+- Inline canvas editing for note card titles, note descriptions, organization frame names, and frame notes.
+- Draggable link bend handles for manually shaping workflow connections.
+- JSON import/export for backup and portability.
+- MIT license and reproducible release packaging scripts.
+
+## What's New in v1.1.0
+
+- Added draggable link bend handles on the workspace canvas so users can manually shape workflow connections.
+- Persisted custom link control points in local data and JSON import/export manifests.
+- Added inline editing for note card titles and note text directly inside canvas cards.
+- Added inline editing for organization frame names and frame notes.
+- Added core tests for canvas coordinate conversion and custom link control-point round trips.
+- Updated release packaging to derive build numbers from the version and reuse versioned release notes.
 
 ## Product Workflow
 
@@ -89,7 +114,7 @@ Download the latest release from the [GitHub Releases page](https://github.com/Q
 
 Use the `.dmg` package for the normal macOS install path:
 
-1. Open `MyDesk-v1.0.0-macOS.dmg`.
+1. Open `MyDesk-v1.1.0-macOS.dmg`.
 2. Drag `MyDesk.app` to `Applications`.
 3. Launch `MyDesk` from Applications.
 
