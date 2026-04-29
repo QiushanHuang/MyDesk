@@ -6,42 +6,51 @@
 ![Swift](https://img.shields.io/badge/Swift-6.0-F05138)
 ![UI](https://img.shields.io/badge/UI-SwiftUI-0A84FF)
 ![Storage](https://img.shields.io/badge/storage-SwiftData-34C759)
-![Status](https://img.shields.io/badge/status-active%20product-22C55E)
+![License](https://img.shields.io/badge/license-MIT-22C55E)
 
-## Product Vision
+## Overview
 
-MyDesk is designed as a complete personal productivity product for people who work across many files, folders, notes, commands, and project contexts every day.
+MyDesk is a complete personal productivity workspace for macOS. It helps people who work across many projects keep their folders, files, notes, commands, and visual relationships organized in one calm, native desktop app.
 
-Instead of forcing everything into a file tree or a notes app, MyDesk gives each workspace a living surface: pinned resources, reusable snippets, searchable libraries, and a visual canvas that shows how things relate.
+Instead of forcing every project into a plain file tree or a long notes document, MyDesk gives each workspace a structured home: a dashboard, pinned resources, reusable snippets, searchable libraries, and a canvas for mapping how the work fits together.
 
 > [!TIP]
-> MyDesk is not just a launcher. It is a project operating surface: organize, open, connect, export, and return to active work without rebuilding context each time.
+> MyDesk is built for returning to work quickly. Open the app, choose a workspace, and immediately see the files, folders, snippets, and relationships that matter.
 
-## What It Does
+## Product Experience
 
-| Area | Product Experience | Why It Matters |
-| --- | --- | --- |
-| 🏠 Home | A central dashboard for active workspaces and recent context. | Start from the work, not from scattered folders. |
-| 📌 Pinned Resources | Dedicated pinned folders and files with custom names and quick actions. | Keep important materials one click away. |
-| 🗂 Global Library | A reusable library of files, folders, and references across workspaces. | Separate permanent resources from temporary workspace shortcuts. |
-| ✍️ Snippet Library | Store reusable commands, text snippets, notes, and operational references. | Reduce repeated typing and preserve personal workflow knowledge. |
-| 🧭 Workspace Canvas | Arrange resources visually, connect related items, frame groups, and zoom around the workspace. | Make project structure visible instead of buried in lists. |
-| 🔄 Import / Export | Move workspace data through a structured JSON manifest. | Keep your work portable and recoverable. |
-| 🖥 macOS Integration | Open Finder locations, reveal files, and run Terminal-oriented workflows. | Fit naturally into the desktop workflow. |
+| Area | Experience |
+| --- | --- |
+| 🏠 Home | A clean starting point for active workspaces and recently used context. |
+| 📌 Pinned Resources | Keep important folders and files close, with custom names and quick path actions. |
+| 🗂 Global Library | Maintain a reusable resource library that is available across workspaces. |
+| ✍️ Snippet Library | Save commands, notes, text blocks, and operational references for repeated work. |
+| 🧭 Workspace Canvas | Arrange project resources visually, connect related items, group them into frames, and zoom through the workspace. |
+| 🔄 Import / Export | Move workspace data through a structured JSON manifest when you need portability or backup. |
+| 🖥 macOS Integration | Open Finder locations, reveal files, and support Terminal-oriented workflows from inside the app. |
 
-## Core Product Modules
+## Designed For
 
-| Module | Included Capabilities |
+| User Need | How MyDesk Helps |
+| --- | --- |
+| Research projects | Keep papers, datasets, scripts, notes, and output folders together. |
+| Creative production | Organize assets, references, drafts, exports, and reusable instructions. |
+| Development work | Pin repositories, commands, snippets, specs, and related files around a workspace canvas. |
+| Daily operations | Keep frequently used folders, files, and terminal commands within reach. |
+
+> [!IMPORTANT]
+> MyDesk stores local app data with SwiftData. Generated build artifacts, local Codex metadata, and app bundles are intentionally ignored by Git.
+
+## Capabilities
+
+| Capability | Details |
 | --- | --- |
 | Workspace Management | Create, rename, delete, pin, sort, and reopen workspaces. |
 | Resource Management | Pin files and folders, preserve original names, add custom display names, copy paths, and route Finder actions correctly. |
 | Canvas System | Drop placement, auto-arrange, zoom scaling, visible edge anchors, arrow rendering, animated relationship flow, frames, and grouped movement. |
 | Snippets | Store reusable text and command assets with metadata and workspace scope. |
-| Data Portability | Schema-versioned export manifest with backward-compatible decoding for older records. |
-| Reliability Layer | Unit-tested ordering, shell quoting, manifest round trips, canvas geometry, and Finder routing behavior. |
-
-> [!IMPORTANT]
-> MyDesk stores local app data with SwiftData and keeps generated artifacts out of version control. Build outputs, local Codex metadata, and app bundles are intentionally ignored.
+| Data Portability | Export and import schema-versioned workspace manifests with compatibility for older records. |
+| Core Reliability | Core ordering, layout, export, shell quoting, and Finder routing logic are covered by XCTest. |
 
 ## Product Workflow
 
@@ -53,14 +62,6 @@ flowchart LR
     D --> E["Open, copy, run, or export when needed"]
     E --> B
 ```
-
-## Why MyDesk Feels Like a Product
-
-- **Native first**: built as a macOS app with SwiftUI instead of a wrapped web page.
-- **Data-aware**: SwiftData-backed models for workspaces, pins, snippets, canvases, nodes, edges, and Finder aliases.
-- **Portable**: import and export use a structured manifest rather than opaque local-only state.
-- **Tested core**: behavior that should not regress lives in `MyDeskCore` with focused XCTest coverage.
-- **Workflow-centered**: the UI is organized around repeated daily actions: find, open, copy, connect, and resume.
 
 ## Tech Stack
 
@@ -111,17 +112,6 @@ docs/                 design notes and implementation plans
 script/               local build and run helpers
 ```
 
-## Quality Snapshot
-
-| Check | Status |
-| --- | --- |
-| Swift package build | ✅ Supported |
-| Core unit tests | ✅ 28 passing tests |
-| Manifest round trip | ✅ Covered |
-| Canvas geometry | ✅ Covered |
-| Shell quoting | ✅ Covered |
-| Finder routing | ✅ Covered |
-
 ## Roadmap
 
 | Theme | Direction |
@@ -140,4 +130,4 @@ Built and maintained by **Qiushan Huang**.
 
 ## License
 
-No license has been declared yet. Add a license before distributing or accepting external contributions.
+MyDesk is released under the [MIT License](LICENSE).
