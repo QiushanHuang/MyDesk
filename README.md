@@ -77,8 +77,23 @@ flowchart LR
 ## Requirements
 
 - macOS 14 or newer
+
+For downloading a release build, macOS 14 or newer is enough. Building from source also requires:
+
 - Xcode command line tools
 - Swift 6 toolchain
+
+## Install
+
+Download the latest release from the [GitHub Releases page](https://github.com/QiushanHuang/MyDesk/releases).
+
+Use the `.dmg` package for the normal macOS install path:
+
+1. Open `MyDesk-v1.0.0-macOS.dmg`.
+2. Drag `MyDesk.app` to `Applications`.
+3. Launch `MyDesk` from Applications.
+
+The current public build is ad-hoc signed but not notarized because no Developer ID certificate is configured for this repository yet. If macOS blocks the first launch, right-click `MyDesk.app`, choose **Open**, or allow it in **System Settings > Privacy & Security**.
 
 ## Build & Run
 
@@ -101,6 +116,14 @@ Build and launch the app bundle:
 ```
 
 The helper script builds the package, creates `dist/MyDesk.app`, copies the app icon, writes a minimal `Info.plist`, and launches the app.
+
+Create release artifacts:
+
+```bash
+./script/package_release.sh
+```
+
+The release script creates a versioned ZIP, DMG, install notes, release notes, and SHA-256 checksums under `dist/release/`.
 
 ## Project Structure
 

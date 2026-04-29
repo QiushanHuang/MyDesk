@@ -5,8 +5,10 @@ MODE="${1:-run}"
 APP_NAME="MyDesk"
 BUNDLE_ID="studio.qiushan.mydesk"
 MIN_SYSTEM_VERSION="14.0"
+COPYRIGHT="Copyright © 2026 Qiushan Huang. All rights reserved."
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+VERSION="$(tr -d '[:space:]' <"$ROOT_DIR/VERSION")"
 DIST_DIR="$ROOT_DIR/dist"
 APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 APP_CONTENTS="$APP_BUNDLE/Contents"
@@ -44,10 +46,16 @@ cat >"$INFO_PLIST" <<PLIST
   <string>AppIcon</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>$VERSION</string>
+  <key>CFBundleVersion</key>
+  <string>100</string>
   <key>LSMinimumSystemVersion</key>
   <string>$MIN_SYSTEM_VERSION</string>
   <key>NSPrincipalClass</key>
   <string>NSApplication</string>
+  <key>NSHumanReadableCopyright</key>
+  <string>$COPYRIGHT</string>
   <key>NSAppleEventsUsageDescription</key>
   <string>MyDesk uses Automation only after confirmation to create Finder aliases and run commands in Terminal.</string>
   <key>NSDesktopFolderUsageDescription</key>
