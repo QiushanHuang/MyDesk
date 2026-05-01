@@ -22,6 +22,7 @@ struct ContentView: View {
     @Query private var nodes: [CanvasNodeModel]
     @Query private var edges: [CanvasEdgeModel]
     @Query private var aliases: [FinderAliasRecordModel]
+    @AppStorage(AppPreferenceKeys.canvasDefaultZoomPercent) private var canvasDefaultZoomPercent = CanvasZoomBaseline.defaultPercent
 
     @State private var selection: SidebarSelection? = .home
     @State private var inspectorSelection: InspectorSelection?
@@ -33,9 +34,20 @@ struct ContentView: View {
     @State private var workspaceToDelete: WorkspaceModel?
     @State private var renamingResource: ResourcePinModel?
     @State private var resourceToRemove: ResourcePinModel?
+    @State private var editingSnippet: SnippetModel?
+    @State private var snippetToDelete: SnippetModel?
     @State private var pinnedFoldersDropTarget = false
     @State private var pinnedFilesDropTarget = false
     @State private var isInspectorVisible = false
+
+    private var defaultCanvasZoom: Double {
+        CanvasZoomBaseline.actualZoom(
+            percent: canvasDefaultZoomPercent,
+            standardBaseline: CanvasZoomBaseline.standardBaseline,
+            minimum: CanvasZoomBaseline.minimumZoom,
+            maximum: CanvasZoomBaseline.maximumZoom
+        )
+    }
 
     var body: some View {
         NavigationSplitView {
@@ -132,6 +144,11 @@ struct ContentView: View {
                 }
             }
             .listStyle(.sidebar)
+            .navigationSplitViewColumnWidth(
+                min: WorkbenchSidebarMetrics.minimumWidth,
+                ideal: WorkbenchSidebarMetrics.idealWidth,
+                max: WorkbenchSidebarMetrics.maximumWidth
+            )
             .toolbar {
                 Button {
                     addWorkspace()
@@ -203,6 +220,11 @@ struct ContentView: View {
                 saveResourceRename(resource)
             }
         }
+        .sheet(item: $editingSnippet) { snippet in
+            SnippetEditor(snippet: snippet, scope: snippet.scope, workspaceId: snippet.workspaceId) { draft in
+                saveSnippet(snippet, draft: draft)
+            }
+        }
         .alert("Delete workspace metadata?", isPresented: Binding(
             get: { workspaceToDelete != nil },
             set: { if !$0 { workspaceToDelete = nil } }
@@ -237,6 +259,24 @@ struct ContentView: View {
         } message: {
             if let resourceToRemove {
                 Text("This removes \(resourceToRemove.displayName) and related MyDesk canvas cards/aliases from MyDesk metadata only. Finder files and folders are not deleted, renamed, or moved.")
+            }
+        }
+        .alert("Delete snippet metadata?", isPresented: Binding(
+            get: { snippetToDelete != nil },
+            set: { if !$0 { snippetToDelete = nil } }
+        )) {
+            Button("Delete From MyDesk", role: .destructive) {
+                if let snippetToDelete {
+                    deleteSnippet(snippetToDelete)
+                }
+                snippetToDelete = nil
+            }
+            Button("Cancel", role: .cancel) {
+                snippetToDelete = nil
+            }
+        } message: {
+            if let snippetToDelete {
+                Text("This removes \(snippetToDelete.title), related canvas snippet cards, and MyDesk alias metadata. Finder files and folders are not deleted, renamed, or moved.")
             }
         }
     }
@@ -292,7 +332,10 @@ struct ContentView: View {
                     showInspector(.resource($0.id))
                     setStatus("Showing info for \($0.displayName)")
                 },
-                onSelectSnippet: { showInspector(.snippet($0.id)) }
+                onCopySnippet: copySnippet,
+                onEditSnippet: { editingSnippet = $0 },
+                onDeleteSnippet: { snippetToDelete = $0 },
+                onInspectSnippet: { showInspector(.snippet($0.id)) }
             )
         case .global:
             GlobalLibraryView(
@@ -303,7 +346,9 @@ struct ContentView: View {
                 onSelectResource: { selection = .resource($0.id) },
                 onStatus: setStatus,
                 onInspect: showInspector,
-                onRemove: { resourceToRemove = $0 }
+                onRemove: { resourceToRemove = $0 },
+                onEditSnippet: { editingSnippet = $0 },
+                onDeleteSnippet: { snippetToDelete = $0 }
             )
         case .pinnedFolders:
             ResourceListView(
@@ -356,7 +401,9 @@ struct ContentView: View {
                 scope: nil,
                 workspaceId: nil,
                 onStatus: setStatus,
-                onInspect: showInspector
+                onInspect: showInspector,
+                onEdit: { editingSnippet = $0 },
+                onDelete: { snippetToDelete = $0 }
             )
         case .workspace(let id):
             if let workspace = workspaces.first(where: { $0.id == id }) {
@@ -373,7 +420,9 @@ struct ContentView: View {
                     onRenameWorkspace: { renamingWorkspace = $0 },
                     onDeleteWorkspace: { workspaceToDelete = $0 },
                     onToggleWorkspacePinned: { toggleWorkspacePinned($0) },
-                    onRemoveResource: { resourceToRemove = $0 }
+                    onRemoveResource: { resourceToRemove = $0 },
+                    onEditSnippet: { editingSnippet = $0 },
+                    onDeleteSnippet: { snippetToDelete = $0 }
                 )
             } else {
                 ContentUnavailableView("Workspace missing", systemImage: "questionmark.folder")
@@ -477,7 +526,7 @@ struct ContentView: View {
     private func addWorkspace() {
         let nextIndex = (orderedWorkspaces.map(\.sortIndex).max() ?? -1) + 1
         let workspace = WorkspaceModel(title: "New Workspace", details: "Describe this workspace.", sortIndex: nextIndex)
-        let canvas = CanvasModel(workspaceId: workspace.id, title: "Workspace Map")
+        let canvas = CanvasModel(workspaceId: workspace.id, title: "Workspace Map", zoom: defaultCanvasZoom)
         modelContext.insert(workspace)
         modelContext.insert(canvas)
         do {
@@ -512,6 +561,38 @@ struct ContentView: View {
             resource.updatedAt = .now
             try modelContext.save()
             setStatus("Renamed MyDesk metadata: \(resource.displayName)")
+        } catch {
+            modelContext.rollback()
+            setStatus(error.localizedDescription)
+        }
+    }
+
+    private func copySnippet(_ snippet: SnippetModel) {
+        ClipboardService().copy(snippet.body)
+        snippet.lastCopiedAt = .now
+        snippet.updatedAt = .now
+        do {
+            try modelContext.save()
+            setStatus("Copied \(snippet.kind.rawValue): \(snippet.title)")
+        } catch {
+            modelContext.rollback()
+            setStatus(error.localizedDescription)
+        }
+    }
+
+    private func saveSnippet(_ snippet: SnippetModel, draft: SnippetEditorDraft) {
+        do {
+            snippet.workspaceId = draft.scope == .workspace ? draft.workspaceId : nil
+            snippet.title = draft.title
+            snippet.kindRaw = draft.kind.rawValue
+            snippet.body = draft.body
+            snippet.details = draft.details
+            snippet.tags = draft.tags
+            snippet.scopeRaw = draft.scope.rawValue
+            snippet.requiresConfirmation = draft.kind == .command ? draft.requiresConfirmation : false
+            snippet.updatedAt = .now
+            try modelContext.save()
+            setStatus("Updated snippet: \(snippet.title)")
         } catch {
             modelContext.rollback()
             setStatus(error.localizedDescription)
@@ -674,6 +755,30 @@ struct ContentView: View {
                 inspectorSelection = nil
             }
             setStatus("Removed \(resource.displayName) from MyDesk metadata. Finder items affected: 0")
+        } catch {
+            modelContext.rollback()
+            setStatus(error.localizedDescription)
+        }
+    }
+
+    private func deleteSnippet(_ snippet: SnippetModel) {
+        do {
+            let snippetNodeIds = Set(nodes.filter { $0.objectType == "snippet" && $0.objectId == snippet.id }.map(\.id))
+            for edge in edges where snippetNodeIds.contains(edge.sourceNodeId) || snippetNodeIds.contains(edge.targetNodeId) {
+                modelContext.delete(edge)
+            }
+            for node in nodes where snippetNodeIds.contains(node.id) {
+                modelContext.delete(node)
+            }
+            for alias in aliases where alias.sourceObjectType == "snippet" && alias.sourceObjectId == snippet.id {
+                alias.status = .missing
+            }
+            modelContext.delete(snippet)
+            try modelContext.save()
+            if inspectorSelection == .snippet(snippet.id) {
+                inspectorSelection = nil
+            }
+            setStatus("Deleted snippet metadata: \(snippet.title)")
         } catch {
             modelContext.rollback()
             setStatus(error.localizedDescription)
@@ -978,7 +1083,11 @@ struct HomeView: View {
     let onOpenResource: (ResourcePinModel) -> Void
     let onCopyResourcePath: (ResourcePinModel) -> Void
     let onInspectResource: (ResourcePinModel) -> Void
-    let onSelectSnippet: (SnippetModel) -> Void
+    let onCopySnippet: (SnippetModel) -> Void
+    let onEditSnippet: (SnippetModel) -> Void
+    let onDeleteSnippet: (SnippetModel) -> Void
+    let onInspectSnippet: (SnippetModel) -> Void
+    @State private var expandedSnippetIDs: Set<String> = []
 
     var body: some View {
         ScrollView {
@@ -1015,15 +1124,34 @@ struct HomeView: View {
                 DashboardSection(title: "Recent Snippets") {
                     CardGrid {
                         ForEach(snippets.prefix(8)) { snippet in
-                            DashboardCard(title: snippet.title, subtitle: snippet.kind.rawValue.capitalized, systemImage: snippet.kind == .prompt ? "text.quote" : "terminal") {
-                                onSelectSnippet(snippet)
-                            }
+                            SnippetActionCard(
+                                snippet: snippet,
+                                isExpanded: expandedSnippetIDs.contains(snippet.id),
+                                compact: true,
+                                onToggleExpanded: { toggleSnippet(snippet) },
+                                onCopy: { onCopySnippet(snippet) },
+                                onEdit: { onEditSnippet(snippet) },
+                                onDelete: { onDeleteSnippet(snippet) },
+                                onInspect: { onInspectSnippet(snippet) },
+                                onOpenTerminal: nil,
+                                onRun: nil
+                            )
                         }
                     }
                 }
             }
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func toggleSnippet(_ snippet: SnippetModel) {
+        withAnimation(.easeInOut(duration: 0.16)) {
+            if expandedSnippetIDs.contains(snippet.id) {
+                expandedSnippetIDs.remove(snippet.id)
+            } else {
+                expandedSnippetIDs.insert(snippet.id)
+            }
         }
     }
 }
@@ -1187,41 +1315,67 @@ struct GlobalLibraryView: View {
     let onStatus: (String) -> Void
     let onInspect: (InspectorSelection) -> Void
     let onRemove: (ResourcePinModel) -> Void
+    let onEditSnippet: (SnippetModel) -> Void
+    let onDeleteSnippet: (SnippetModel) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(title)
-                .font(.title.bold())
-            ResourceListView(
-                title: "Folders",
-                resources: resources,
-                knownResources: knownResources,
-                scope: .global,
-                workspaceId: nil,
-                targetFilter: .folder,
-                pinImported: false,
-                onSelect: onSelectResource,
-                onStatus: onStatus,
-                onInspect: onInspect,
-                onRemove: onRemove
-            )
-            ResourceListView(
-                title: "Files",
-                resources: resources,
-                knownResources: knownResources,
-                scope: .global,
-                workspaceId: nil,
-                targetFilter: .file,
-                pinImported: false,
-                onSelect: onSelectResource,
-                onStatus: onStatus,
-                onInspect: onInspect,
-                onRemove: onRemove
-            )
-            Divider()
-            SnippetLibraryView(snippets: snippets, resources: resources, scope: .global, workspaceId: nil, onStatus: onStatus, onInspect: onInspect)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                Text(title)
+                    .font(.title.bold())
+                ResourceListView(
+                    title: "Folders",
+                    resources: resources,
+                    knownResources: knownResources,
+                    scope: .global,
+                    workspaceId: nil,
+                    targetFilter: .folder,
+                    pinImported: false,
+                    onSelect: onSelectResource,
+                    onStatus: onStatus,
+                    onInspect: onInspect,
+                    onRemove: onRemove,
+                    listMinHeight: 122,
+                    listMaxHeight: 240,
+                    compactEmptyState: true
+                )
+                ResourceListView(
+                    title: "Files",
+                    resources: resources,
+                    knownResources: knownResources,
+                    scope: .global,
+                    workspaceId: nil,
+                    targetFilter: .file,
+                    pinImported: false,
+                    onSelect: onSelectResource,
+                    onStatus: onStatus,
+                    onInspect: onInspect,
+                    onRemove: onRemove,
+                    listMinHeight: 122,
+                    listMaxHeight: 240,
+                    compactEmptyState: true
+                )
+                Divider()
+                SnippetLibraryView(
+                    snippets: snippets,
+                    resources: resources,
+                    scope: .global,
+                    workspaceId: nil,
+                    onStatus: onStatus,
+                    onInspect: onInspect,
+                    onEdit: onEditSnippet,
+                    onDelete: onDeleteSnippet,
+                    listMinHeight: 160,
+                    listMaxHeight: 320,
+                    compactEmptyState: true
+                )
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 22)
+            .padding(.bottom, 28)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 
@@ -1240,8 +1394,20 @@ struct WorkspaceDetailView: View {
     let onDeleteWorkspace: (WorkspaceModel) -> Void
     let onToggleWorkspacePinned: (WorkspaceModel) -> Void
     let onRemoveResource: (ResourcePinModel) -> Void
+    let onEditSnippet: (SnippetModel) -> Void
+    let onDeleteSnippet: (SnippetModel) -> Void
+    @AppStorage(AppPreferenceKeys.canvasDefaultZoomPercent) private var canvasDefaultZoomPercent = CanvasZoomBaseline.defaultPercent
     @State private var tab = "Canvas"
     @State private var createdCanvasByWorkspaceId: [String: CanvasModel] = [:]
+
+    private var defaultCanvasZoom: Double {
+        CanvasZoomBaseline.actualZoom(
+            percent: canvasDefaultZoomPercent,
+            standardBaseline: CanvasZoomBaseline.standardBaseline,
+            minimum: CanvasZoomBaseline.minimumZoom,
+            maximum: CanvasZoomBaseline.maximumZoom
+        )
+    }
 
     private var workspaceResources: [ResourcePinModel] {
         resources.filter { $0.scope == .global || $0.workspaceId == workspace.id }
@@ -1293,7 +1459,7 @@ struct WorkspaceDetailView: View {
             case "Resources":
                 ResourceListView(title: "Workspace Resources", resources: workspaceResources, knownResources: resources, scope: .workspace, workspaceId: workspace.id, targetFilter: nil, pinImported: false, onSelect: nil, onStatus: onStatus, onInspect: onInspect, onRemove: onRemoveResource)
             case "Snippets":
-                SnippetLibraryView(snippets: workspaceSnippets, resources: workspaceResources, scope: .workspace, workspaceId: workspace.id, onStatus: onStatus, onInspect: onInspect)
+                SnippetLibraryView(snippets: workspaceSnippets, resources: workspaceResources, scope: .workspace, workspaceId: workspace.id, onStatus: onStatus, onInspect: onInspect, onEdit: onEditSnippet, onDelete: onDeleteSnippet)
             default:
                 if let canvas = workspaceCanvas {
                     WorkspaceCanvasView(
@@ -1330,7 +1496,7 @@ struct WorkspaceDetailView: View {
     private func ensureCanvas() {
         guard canvases.first(where: { $0.workspaceId == workspace.id }) == nil else { return }
         guard createdCanvasByWorkspaceId[workspace.id] == nil else { return }
-        let created = CanvasModel(workspaceId: workspace.id, title: "Workspace Map")
+        let created = CanvasModel(workspaceId: workspace.id, title: "Workspace Map", zoom: defaultCanvasZoom)
         createdCanvasByWorkspaceId[workspace.id] = created
         modelContext.insert(created)
         do {

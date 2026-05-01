@@ -18,6 +18,45 @@ final class CoreBehaviorTests: XCTestCase {
         )
     }
 
+    func testPersistentStoreLayoutUsesAppSpecificStoreDirectory() {
+        let support = URL(fileURLWithPath: "/tmp/Application Support", isDirectory: true)
+        let layout = MyDeskStoreLayout(applicationSupportDirectory: support)
+
+        XCTAssertEqual(
+            layout.storeURL.path,
+            "/tmp/Application Support/studio.qiushan.mydesk/Stores/MyDesk.store"
+        )
+        XCTAssertEqual(layout.legacyDefaultStoreURL.path, "/tmp/Application Support/default.store")
+        XCTAssertEqual(
+            layout.backupDirectory.path,
+            "/tmp/Application Support/studio.qiushan.mydesk/Backups"
+        )
+    }
+
+    func testPersistentStoreLayoutTreatsSQLiteCompanionsAsOneStore() {
+        let store = URL(fileURLWithPath: "/tmp/MyDesk.store")
+
+        XCTAssertEqual(
+            MyDeskStoreLayout.sqliteFileSet(for: store).map(\.lastPathComponent),
+            ["MyDesk.store", "MyDesk.store-wal", "MyDesk.store-shm"]
+        )
+    }
+
+    func testPersistentStoreBackupRetentionDeletesOldestFoldersFirst() {
+        let backupRoot = URL(fileURLWithPath: "/tmp/Backups", isDirectory: true)
+        let folders = [
+            backupRoot.appendingPathComponent("20260430-091100", isDirectory: true),
+            backupRoot.appendingPathComponent("20260430-091300", isDirectory: true),
+            backupRoot.appendingPathComponent("20260430-091200", isDirectory: true),
+            backupRoot.appendingPathComponent("not-a-backup", isDirectory: true)
+        ]
+
+        XCTAssertEqual(
+            MyDeskStoreLayout.backupFoldersToPrune(folders, keepingNewest: 2).map(\.lastPathComponent),
+            ["20260430-091100"]
+        )
+    }
+
     func testCanvasAutoArrangeProducesGridPositions() {
         let nodes = [
             CanvasLayoutNode(id: "a", x: 0, y: 0, width: 120, height: 80),
@@ -30,6 +69,73 @@ final class CoreBehaviorTests: XCTestCase {
         XCTAssertEqual(arranged[2].y, 120)
     }
 
+    func testCanvasAutoArrangeGridUsesColumnWidthsToAvoidOverlap() {
+        let nodes = [
+            CanvasLayoutNode(id: "wide", x: 0, y: 0, width: 360, height: 80),
+            CanvasLayoutNode(id: "right", x: 0, y: 0, width: 120, height: 80),
+            CanvasLayoutNode(id: "bottom", x: 0, y: 0, width: 180, height: 80)
+        ]
+
+        let arranged = CanvasLayoutEngine.autoArrange(nodes, columns: 2, spacing: 40)
+
+        XCTAssertEqual(arranged[1].x, 400)
+        XCTAssertFalse(layoutNodesOverlap(arranged))
+    }
+
+    func testCanvasAutoArrangeUsesEdgesForLeftToRightWorkflowLayers() {
+        let nodes = [
+            CanvasLayoutNode(id: "finish", x: 0, y: 0, width: 120, height: 80),
+            CanvasLayoutNode(id: "source", x: 0, y: 0, width: 120, height: 80),
+            CanvasLayoutNode(id: "branch", x: 0, y: 0, width: 120, height: 80),
+            CanvasLayoutNode(id: "middle", x: 0, y: 0, width: 120, height: 80)
+        ]
+        let edges = [
+            CanvasLayoutEdge(sourceNodeId: "source", targetNodeId: "middle"),
+            CanvasLayoutEdge(sourceNodeId: "source", targetNodeId: "branch"),
+            CanvasLayoutEdge(sourceNodeId: "middle", targetNodeId: "finish")
+        ]
+
+        let arranged = Dictionary(
+            uniqueKeysWithValues: CanvasLayoutEngine.autoArrange(
+                nodes,
+                edges: edges,
+                horizontalSpacing: 80,
+                verticalSpacing: 40
+            ).map { ($0.id, $0) }
+        )
+
+        XCTAssertLessThan(arranged["source"]!.x, arranged["middle"]!.x)
+        XCTAssertLessThan(arranged["source"]!.x, arranged["branch"]!.x)
+        XCTAssertLessThan(arranged["middle"]!.x, arranged["finish"]!.x)
+        XCTAssertEqual(arranged["middle"]!.x, arranged["branch"]!.x)
+        XCTAssertLessThan(arranged["middle"]!.y, arranged["branch"]!.y)
+    }
+
+    func testCanvasAutoArrangePlacesDisconnectedNodesAfterWorkflowWithoutOverlap() {
+        let nodes = [
+            CanvasLayoutNode(id: "source", x: 0, y: 0, width: 120, height: 80),
+            CanvasLayoutNode(id: "target", x: 0, y: 0, width: 140, height: 90),
+            CanvasLayoutNode(id: "loose-a", x: 0, y: 0, width: 180, height: 110),
+            CanvasLayoutNode(id: "loose-b", x: 0, y: 0, width: 120, height: 80)
+        ]
+        let edges = [
+            CanvasLayoutEdge(sourceNodeId: "source", targetNodeId: "target")
+        ]
+
+        let arranged = CanvasLayoutEngine.autoArrange(
+            nodes,
+            edges: edges,
+            horizontalSpacing: 80,
+            verticalSpacing: 40
+        )
+        let byId = Dictionary(uniqueKeysWithValues: arranged.map { ($0.id, $0) })
+        let workflowBottom = max(byId["source"]!.y + byId["source"]!.height, byId["target"]!.y + byId["target"]!.height)
+
+        XCTAssertGreaterThan(byId["loose-a"]!.y, workflowBottom)
+        XCTAssertGreaterThan(byId["loose-b"]!.y, workflowBottom)
+        XCTAssertFalse(layoutNodesOverlap(arranged))
+    }
+
     func testAlignLeftUsesMinimumX() {
         let nodes = [
             CanvasLayoutNode(id: "a", x: 50, y: 0, width: 120, height: 80),
@@ -38,6 +144,24 @@ final class CoreBehaviorTests: XCTestCase {
         let aligned = CanvasLayoutEngine.alignLeft(nodes)
         XCTAssertEqual(aligned.map(\.x), [10, 10])
     }
+
+    private func layoutNodesOverlap(_ nodes: [CanvasLayoutNode]) -> Bool {
+        for lhsIndex in nodes.indices {
+            for rhsIndex in nodes.indices where rhsIndex > lhsIndex {
+                let lhs = nodes[lhsIndex]
+                let rhs = nodes[rhsIndex]
+                let separated = lhs.x + lhs.width <= rhs.x ||
+                    rhs.x + rhs.width <= lhs.x ||
+                    lhs.y + lhs.height <= rhs.y ||
+                    rhs.y + rhs.height <= lhs.y
+                if !separated {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
 
     func testWorkspaceSidebarOrderingPinsFirstThenUsesStableSort() {
         let older = Date(timeIntervalSince1970: 10)
@@ -68,6 +192,12 @@ final class CoreBehaviorTests: XCTestCase {
             WorkspaceSidebarOrdering.movedIDs(["a", "b", "c"], moving: "missing", direction: .up),
             ["a", "b", "c"]
         )
+    }
+
+    func testWorkbenchSidebarMetricsAreCompactButReadable() {
+        XCTAssertLessThan(WorkbenchSidebarMetrics.idealWidth, 240)
+        XCTAssertGreaterThanOrEqual(WorkbenchSidebarMetrics.minimumWidth, 200)
+        XCTAssertGreaterThanOrEqual(WorkbenchSidebarMetrics.maximumWidth, WorkbenchSidebarMetrics.idealWidth)
     }
 
     func testManifestRoundTripKeepsSchemaVersion() throws {
@@ -159,6 +289,20 @@ final class CoreBehaviorTests: XCTestCase {
         )
     }
 
+    func testSnippetLibraryFilteringShowsGlobalAndCurrentWorkspaceOnly() {
+        let global = SnippetLibraryRecord(id: "global", scope: "global", workspaceId: nil, title: "Global", updatedAt: Date(timeIntervalSince1970: 1))
+        let current = SnippetLibraryRecord(id: "current", scope: "workspace", workspaceId: "workspace-a", title: "Current", updatedAt: Date(timeIntervalSince1970: 3))
+        let other = SnippetLibraryRecord(id: "other", scope: "workspace", workspaceId: "workspace-b", title: "Other", updatedAt: Date(timeIntervalSince1970: 4))
+
+        let visible = SnippetLibraryFiltering.visible(
+            [global, current, other],
+            scope: "workspace",
+            workspaceId: "workspace-a"
+        )
+
+        XCTAssertEqual(visible.map(\.id), ["current", "global"])
+    }
+
     func testCanvasEdgeIdentityTreatsOppositeDirectionsAsDifferentLinks() {
         let existing = [
             CanvasEdgeIdentity(sourceNodeId: "a", targetNodeId: "b")
@@ -208,6 +352,45 @@ final class CoreBehaviorTests: XCTestCase {
         XCTAssertEqual(moved.first { $0.id == "outside" }?.y, 120)
     }
 
+    func testFrameGeometryMovesContainedEdgeControlPointsWithFrame() {
+        let frame = CanvasFrameRect(id: "frame", x: 100, y: 80, width: 300, height: 220)
+        let points = [
+            CanvasFramePosition(id: "inside", x: 180, y: 140),
+            CanvasFramePosition(id: "outside", x: 40, y: 140)
+        ]
+
+        let moved = CanvasFrameGeometry.movedControlPoints(
+            points,
+            inside: frame,
+            deltaX: 32,
+            deltaY: -12
+        )
+
+        XCTAssertEqual(moved.first { $0.id == "inside" }?.x, 212)
+        XCTAssertEqual(moved.first { $0.id == "inside" }?.y, 128)
+        XCTAssertEqual(moved.first { $0.id == "outside" }?.x, 40)
+        XCTAssertEqual(moved.first { $0.id == "outside" }?.y, 140)
+    }
+
+    func testFrameGeometryResolvesContainmentFromMovedRects() throws {
+        let rects = [
+            CanvasFrameRect(id: "frame", x: 0, y: 0, width: 300, height: 220),
+            CanvasFrameRect(id: "child", x: 40, y: 50, width: 120, height: 80),
+            CanvasFrameRect(id: "other-frame", x: 500, y: 0, width: 300, height: 220)
+        ]
+
+        let movedRects = CanvasFrameGeometry.movedRects(
+            rects,
+            movedIDs: ["frame", "child"],
+            deltaX: 500,
+            deltaY: 0
+        )
+        let child = try XCTUnwrap(movedRects.first { $0.id == "child" })
+        let frames = movedRects.filter { ["frame", "other-frame"].contains($0.id) }
+
+        XCTAssertEqual(CanvasFrameGeometry.containingFrameId(for: child, frames: frames), "frame")
+    }
+
     func testCanvasEdgeAnchoringUsesHorizontalEdgeMidpoints() {
         let source = CanvasFrameRect(id: "left", x: 0, y: 20, width: 100, height: 80)
         let target = CanvasFrameRect(id: "right", x: 240, y: 60, width: 120, height: 90)
@@ -236,6 +419,197 @@ final class CoreBehaviorTests: XCTestCase {
 
         XCTAssertEqual(anchors.start, CanvasEdgePoint(x: 100, y: 40))
         XCTAssertEqual(anchors.end, CanvasEdgePoint(x: 226, y: 40))
+    }
+
+    func testCanvasEdgeAnchoringUsesControlPointDirectionForSourceWhenPresent() {
+        let source = CanvasFrameRect(id: "left", x: 0, y: 80, width: 100, height: 80)
+        let target = CanvasFrameRect(id: "right", x: 240, y: 80, width: 120, height: 90)
+        let control = CanvasEdgePoint(x: 50, y: 250)
+
+        let anchors = CanvasEdgeAnchoring.anchors(
+            source: source,
+            target: target,
+            control: control,
+            targetClearance: 12
+        )
+
+        XCTAssertEqual(anchors.start, CanvasEdgePoint(x: 50, y: 160))
+        XCTAssertEqual(anchors.end, CanvasEdgePoint(x: 228, y: 125))
+    }
+
+    func testCanvasEdgeAnchoringUsesControlPointDirectionForTargetWhenPresent() {
+        let source = CanvasFrameRect(id: "left", x: 0, y: 80, width: 100, height: 80)
+        let target = CanvasFrameRect(id: "right", x: 240, y: 80, width: 120, height: 90)
+        let control = CanvasEdgePoint(x: 300, y: 0)
+
+        let anchors = CanvasEdgeAnchoring.anchors(
+            source: source,
+            target: target,
+            control: control,
+            targetClearance: 12
+        )
+
+        XCTAssertEqual(anchors.start, CanvasEdgePoint(x: 100, y: 120))
+        XCTAssertEqual(anchors.end, CanvasEdgePoint(x: 300, y: 68))
+    }
+
+    func testCanvasEdgeAnchoringReportsInwardTargetDirectionForLeftAndTopEdges() {
+        let source = CanvasFrameRect(id: "source", x: 0, y: 80, width: 100, height: 80)
+        let leftTarget = CanvasFrameRect(id: "left-target", x: 240, y: 80, width: 120, height: 90)
+        let topTarget = CanvasFrameRect(id: "top-target", x: 240, y: 80, width: 120, height: 90)
+
+        let leftAnchors = CanvasEdgeAnchoring.anchors(
+            source: source,
+            target: leftTarget,
+            control: CanvasEdgePoint(x: 40, y: 120)
+        )
+        let topAnchors = CanvasEdgeAnchoring.anchors(
+            source: source,
+            target: topTarget,
+            control: CanvasEdgePoint(x: 300, y: 0)
+        )
+
+        XCTAssertEqual(leftAnchors.endDirection, CanvasEdgePoint(x: 1, y: 0))
+        XCTAssertEqual(topAnchors.endDirection, CanvasEdgePoint(x: 0, y: 1))
+    }
+
+    func testCanvasEdgeCurveApproachesTargetFromOutsideLeftBorder() {
+        let controls = CanvasEdgeCurveGeometry.automaticControls(
+            start: CanvasEdgePoint(x: 100, y: 120),
+            end: CanvasEdgePoint(x: 240, y: 125),
+            startDirection: CanvasEdgePoint(x: 1, y: 0),
+            endDirection: CanvasEdgePoint(x: 1, y: 0)
+        )
+
+        XCTAssertGreaterThan(controls.control1.x, 100)
+        XCTAssertLessThan(controls.control2.x, 240)
+        XCTAssertEqual(
+            CanvasEdgeCurveGeometry.terminalAngleRadians(endDirection: CanvasEdgePoint(x: 1, y: 0)),
+            0,
+            accuracy: 0.0001
+        )
+    }
+
+    func testCanvasEdgeCurveApproachesTargetFromOutsideTopBorder() {
+        let controls = CanvasEdgeCurveGeometry.automaticControls(
+            start: CanvasEdgePoint(x: 100, y: 120),
+            end: CanvasEdgePoint(x: 300, y: 80),
+            startDirection: CanvasEdgePoint(x: 1, y: 0),
+            endDirection: CanvasEdgePoint(x: 0, y: 1)
+        )
+
+        XCTAssertLessThan(controls.control2.y, 80)
+        XCTAssertEqual(
+            CanvasEdgeCurveGeometry.terminalAngleRadians(endDirection: CanvasEdgePoint(x: 0, y: 1)),
+            Double.pi / 2,
+            accuracy: 0.0001
+        )
+    }
+
+    func testCanvasEdgeCurveKeepsContinuousTangentThroughControlPoint() {
+        let segments = CanvasEdgeCurveGeometry.controlsThroughPoint(
+            start: CanvasEdgePoint(x: 100, y: 120),
+            control: CanvasEdgePoint(x: 190, y: 20),
+            end: CanvasEdgePoint(x: 300, y: 80),
+            startDirection: CanvasEdgePoint(x: 1, y: 0),
+            endDirection: CanvasEdgePoint(x: 0, y: 1)
+        )
+
+        let incomingTangent = CanvasEdgePoint(
+            x: 190 - segments.first.control2.x,
+            y: 20 - segments.first.control2.y
+        )
+        let outgoingTangent = CanvasEdgePoint(
+            x: segments.second.control1.x - 190,
+            y: segments.second.control1.y - 20
+        )
+
+        XCTAssertEqual(
+            incomingTangent.x * outgoingTangent.y - incomingTangent.y * outgoingTangent.x,
+            0,
+            accuracy: 0.0001
+        )
+        XCTAssertGreaterThan(incomingTangent.x * outgoingTangent.x + incomingTangent.y * outgoingTangent.y, 0)
+    }
+
+    func testCanvasEdgeRoutePlannerReturnsNoRouteWhenDirectPathIsClear() {
+        let route = CanvasEdgeRoutePlanner.routePoints(
+            start: CanvasEdgePoint(x: 100, y: 40),
+            end: CanvasEdgePoint(x: 320, y: 40),
+            startDirection: CanvasEdgePoint(x: 1, y: 0),
+            endDirection: CanvasEdgePoint(x: 1, y: 0),
+            obstacles: [
+                CanvasFrameRect(id: "clear", x: 160, y: 120, width: 100, height: 80)
+            ],
+            clearance: 24
+        )
+
+        XCTAssertTrue(route.isEmpty)
+    }
+
+    func testCanvasEdgeRoutePlannerRoutesAroundCardOnDirectPath() {
+        let obstacle = CanvasFrameRect(id: "middle", x: 160, y: 0, width: 100, height: 90)
+        let route = CanvasEdgeRoutePlanner.routePoints(
+            start: CanvasEdgePoint(x: 100, y: 40),
+            end: CanvasEdgePoint(x: 340, y: 40),
+            startDirection: CanvasEdgePoint(x: 1, y: 0),
+            endDirection: CanvasEdgePoint(x: 1, y: 0),
+            obstacles: [obstacle],
+            clearance: 24
+        )
+        let polyline = [CanvasEdgePoint(x: 100, y: 40)] + route + [CanvasEdgePoint(x: 340, y: 40)]
+
+        XCTAssertFalse(route.isEmpty)
+        XCTAssertFalse(CanvasEdgeRoutePlanner.polylineIntersectsObstacles(polyline, obstacles: [obstacle], clearance: 24))
+    }
+
+    func testCanvasEdgeRoutePlannerReroutesWhenMovedCardBecomesObstacle() {
+        let start = CanvasEdgePoint(x: 100, y: 40)
+        let end = CanvasEdgePoint(x: 340, y: 40)
+        let clearObstacle = CanvasFrameRect(id: "middle", x: 160, y: 140, width: 100, height: 90)
+        let blockingObstacle = CanvasFrameRect(id: "middle", x: 160, y: 0, width: 100, height: 90)
+
+        let clearRoute = CanvasEdgeRoutePlanner.routePoints(
+            start: start,
+            end: end,
+            startDirection: CanvasEdgePoint(x: 1, y: 0),
+            endDirection: CanvasEdgePoint(x: 1, y: 0),
+            obstacles: [clearObstacle],
+            clearance: 24
+        )
+        let blockingRoute = CanvasEdgeRoutePlanner.routePoints(
+            start: start,
+            end: end,
+            startDirection: CanvasEdgePoint(x: 1, y: 0),
+            endDirection: CanvasEdgePoint(x: 1, y: 0),
+            obstacles: [blockingObstacle],
+            clearance: 24
+        )
+
+        XCTAssertTrue(clearRoute.isEmpty)
+        XCTAssertFalse(blockingRoute.isEmpty)
+    }
+
+    func testCanvasEdgeRoutePlannerRoutesControlPointSegmentsAroundCard() {
+        let start = CanvasEdgePoint(x: 100, y: 40)
+        let control = CanvasEdgePoint(x: 220, y: 140)
+        let end = CanvasEdgePoint(x: 340, y: 40)
+        let obstacle = CanvasFrameRect(id: "middle", x: 170, y: 55, width: 100, height: 65)
+
+        let route = CanvasEdgeRoutePlanner.routePoints(
+            start: start,
+            end: end,
+            waypoints: [control],
+            startDirection: CanvasEdgePoint(x: 1, y: 0),
+            endDirection: CanvasEdgePoint(x: 1, y: 0),
+            obstacles: [obstacle],
+            clearance: 18
+        )
+        let polyline = [start] + route + [end]
+
+        XCTAssertTrue(route.contains(control))
+        XCTAssertFalse(route.isEmpty)
+        XCTAssertFalse(CanvasEdgeRoutePlanner.polylineIntersectsObstacles(polyline, obstacles: [obstacle], clearance: 18))
     }
 
     func testCanvasViewportProjectionUsesScaledVisibleBounds() {
@@ -299,6 +673,82 @@ final class CoreBehaviorTests: XCTestCase {
         XCTAssertEqual(point.y, 300, accuracy: 0.0001)
     }
 
+    func testCanvasHitTestingTreatsFullScaledCardRectAsNode() {
+        let folder = CanvasFrameRect(id: "folder", x: 150, y: 300, width: 316, height: 226)
+
+        XCTAssertEqual(
+            CanvasHitTesting.target(
+                at: CanvasEdgePoint(x: 158, y: 306),
+                nodes: [folder]
+            ),
+            .node("folder")
+        )
+    }
+
+    func testCanvasHitTestingFallsBackToBackgroundOutsideNodes() {
+        let folder = CanvasFrameRect(id: "folder", x: 150, y: 300, width: 316, height: 226)
+
+        XCTAssertEqual(
+            CanvasHitTesting.target(
+                at: CanvasEdgePoint(x: 149, y: 306),
+                nodes: [folder]
+            ),
+            .background
+        )
+    }
+
+    func testCanvasHitTestingUsesInteractionSlopAroundCardBorders() {
+        let folder = CanvasFrameRect(id: "folder", x: 150, y: 300, width: 316, height: 226)
+
+        XCTAssertEqual(
+            CanvasHitTesting.target(
+                at: CanvasEdgePoint(x: 158, y: 296),
+                nodes: [folder],
+                hitSlop: CanvasInteractionMetrics.nodeHitSlop
+            ),
+            .node("folder")
+        )
+    }
+
+    func testCanvasIconButtonMetricsCenterSymbolInCircle() {
+        XCTAssertEqual(CanvasIconButtonMetrics.circleDiameter, 22)
+        XCTAssertEqual(CanvasIconButtonMetrics.symbolDiameter, 13)
+        XCTAssertEqual(CanvasIconButtonMetrics.symbolOrigin, 4.5)
+    }
+
+    func testCanvasResizeHandleOverlayTracksScaledBottomRightCorner() {
+        let rect = CanvasFrameRect(id: "card", x: 120, y: 80, width: 214 * 1.4, height: 132 * 1.4)
+
+        let center = CanvasResizeHandleGeometry.center(in: rect, zoom: 1.4)
+        let hitRect = CanvasResizeHandleGeometry.hitRect(center: center, zoom: 1.4)
+
+        XCTAssertEqual(center.x, rect.x + rect.width - 17 * 1.4, accuracy: 0.0001)
+        XCTAssertEqual(center.y, rect.y + rect.height - 17 * 1.4, accuracy: 0.0001)
+        XCTAssertTrue(hitRect.width >= 34 * 1.4)
+        XCTAssertTrue(CanvasResizeHandleGeometry.contains(center, in: hitRect))
+    }
+
+    func testCanvasEdgeControlPointAndHandleScaleWithZoom() {
+        let control = CanvasViewportProjection.screenPoint(
+            x: 300,
+            y: 160,
+            zoom: 1.85,
+            viewportX: 24,
+            viewportY: -10
+        )
+
+        XCTAssertEqual(control.x, 579, accuracy: 0.0001)
+        XCTAssertEqual(control.y, 286, accuracy: 0.0001)
+        XCTAssertEqual(CanvasEdgeControlHandleMetrics.diameter(zoom: 1.85, baseDiameter: 13), 24.05, accuracy: 0.0001)
+    }
+
+    func testCanvasEdgeStyleOptionsKeepBaseStyleWhenLockingAnchor() {
+        let locked = CanvasEdgeStyleOptions.style("dashed", controlPointLocked: true)
+
+        XCTAssertTrue(CanvasEdgeStyleOptions.isControlPointLocked(locked))
+        XCTAssertEqual(CanvasEdgeStyleOptions.style(locked, controlPointLocked: false), "dashed")
+    }
+
     func testCanvasEdgeRecordKeepsCustomControlPoint() throws {
         let edge = CanvasEdgeRecord(
             id: "edge",
@@ -334,6 +784,54 @@ final class CoreBehaviorTests: XCTestCase {
         XCTAssertEqual(resized.height, 160)
     }
 
+    func testCanvasNodeSizePolicyUsesStoredCardSizeWithMinimums() {
+        let resource = CanvasNodeSizePolicy.size(
+            kind: "resource",
+            storedWidth: 360,
+            storedHeight: 240,
+            defaultWidth: 214,
+            defaultHeight: 132,
+            minimumWidth: 180,
+            minimumHeight: 112
+        )
+        let note = CanvasNodeSizePolicy.size(
+            kind: "note",
+            storedWidth: 80,
+            storedHeight: 60,
+            defaultWidth: 240,
+            defaultHeight: 180,
+            minimumWidth: 180,
+            minimumHeight: 140
+        )
+
+        XCTAssertEqual(resource.width, 360)
+        XCTAssertEqual(resource.height, 240)
+        XCTAssertEqual(note.width, 180)
+        XCTAssertEqual(note.height, 140)
+    }
+
+    func testCanvasCardTitleLayoutKeepsNoteTitleBoxHalfResourceHeight() {
+        let noteHeight = CanvasCardTitleLayoutPolicy.maxTitleHeight(
+            kind: "note",
+            cardHeight: 180
+        )
+        let resourceHeight = CanvasCardTitleLayoutPolicy.maxTitleHeight(
+            kind: "resource",
+            cardHeight: 180
+        )
+
+        XCTAssertEqual(noteHeight, resourceHeight / 2)
+        XCTAssertEqual(noteHeight, 18)
+        XCTAssertEqual(resourceHeight, 36)
+    }
+
+    func testCanvasChromeRenderingUsesNativeDrawingForSmallText() {
+        XCTAssertTrue(CanvasChromeRenderingPolicy.requiresNativeDrawing(.cardHeader))
+        XCTAssertTrue(CanvasChromeRenderingPolicy.requiresNativeDrawing(.cardDetailLabel))
+        XCTAssertTrue(CanvasChromeRenderingPolicy.requiresNativeDrawing(.cardDetailBody))
+        XCTAssertTrue(CanvasChromeRenderingPolicy.requiresNativeDrawing(.frameNote))
+    }
+
     func testFrameGeometryChoosesSmallestContainingFrame() {
         let card = CanvasFrameRect(id: "card", x: 80, y: 80, width: 100, height: 80)
         let frames = [
@@ -364,10 +862,73 @@ final class CoreBehaviorTests: XCTestCase {
         XCTAssertEqual(CanvasZoomScale.displayPercent(forZoom: 0.175, baseline: 0.35), 50)
     }
 
+    func testCanvasZoomBaselineUsesUserPercentAsDisplayedHundredPercent() {
+        let baseline = CanvasZoomBaseline.actualZoom(
+            percent: 250,
+            standardBaseline: 0.35,
+            minimum: 0.12,
+            maximum: 2.4
+        )
+
+        XCTAssertEqual(baseline, 0.875, accuracy: 0.0001)
+        XCTAssertEqual(CanvasZoomScale.displayPercent(forZoom: baseline, baseline: baseline), 100)
+    }
+
     func testCanvasZoomScaleAllowsZoomBelowBaseline() {
         XCTAssertEqual(CanvasZoomScale.clamped(0.10, minimum: 0.12, maximum: 2.4), 0.12)
         XCTAssertEqual(CanvasZoomScale.zoom(forDisplayScale: 1, baseline: 0.35, minimum: 0.12, maximum: 2.4), 0.35)
         XCTAssertEqual(CanvasZoomScale.zoom(forDisplayScale: 0.5, baseline: 0.35, minimum: 0.12, maximum: 2.4), 0.175)
+    }
+
+    func testCanvasZoomScaleUsesWheelDeltaDirection() {
+        let current = 1.0
+
+        XCTAssertGreaterThan(
+            CanvasZoomScale.zoom(forScrollDeltaY: -20, current: current, minimum: 0.12, maximum: 2.4),
+            current
+        )
+        XCTAssertLessThan(
+            CanvasZoomScale.zoom(forScrollDeltaY: 20, current: current, minimum: 0.12, maximum: 2.4),
+            current
+        )
+    }
+
+    func testCanvasZoomScaleCanReverseWheelDeltaDirection() {
+        let current = 1.0
+
+        XCTAssertLessThan(
+            CanvasZoomScale.zoom(
+                forScrollDeltaY: 20,
+                current: current,
+                minimum: 0.12,
+                maximum: 2.4,
+                direction: .scrollDownZoomsOut
+            ),
+            current
+        )
+        XCTAssertGreaterThan(
+            CanvasZoomScale.zoom(
+                forScrollDeltaY: 20,
+                current: current,
+                minimum: 0.12,
+                maximum: 2.4,
+                direction: .scrollDownZoomsIn
+            ),
+            current
+        )
+    }
+
+    func testCanvasZoomScaleKeepsScreenAnchorStable() {
+        let viewport = CanvasZoomScale.viewport(
+            keepingScreenX: 300,
+            screenY: 200,
+            canvasX: 250,
+            canvasY: 150,
+            zoom: 1.5
+        )
+
+        XCTAssertEqual(viewport.x, -75, accuracy: 0.0001)
+        XCTAssertEqual(viewport.y, -25, accuracy: 0.0001)
     }
 
     func testFolderPreviewOrderingPutsFoldersFirstThenNames() {

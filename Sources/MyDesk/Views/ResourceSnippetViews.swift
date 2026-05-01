@@ -18,6 +18,9 @@ struct ResourceListView: View {
     let onStatus: (String) -> Void
     let onInspect: (InspectorSelection) -> Void
     let onRemove: (ResourcePinModel) -> Void
+    var listMinHeight: CGFloat = 220
+    var listMaxHeight: CGFloat?
+    var compactEmptyState = false
     @State private var searchText = ""
     @State private var isDropTarget = false
     @State private var renamingResource: ResourcePinModel?
@@ -70,30 +73,35 @@ struct ResourceListView: View {
                 ResourceListHeader()
                 ScrollView {
                     LazyVStack(spacing: 0) {
-                        ForEach(filteredResources) { resource in
-                            ResourceRowView(
-                                resource: resource,
-                                onOpen: { performResourceAction(resource, action: .open) },
-                                onReveal: { performResourceAction(resource, action: .reveal) },
-                                onCopy: { performResourceAction(resource, action: .copy) },
-                                onAlias: { createAlias(for: resource) },
-                                onReauthorize: { reauthorize(resource) },
-                                onInspect: {
-                                    onInspect(.resource(resource.id))
-                                    onStatus("Showing info for \(resource.displayName)")
-                                },
-                                onSelect: {
-                                    onSelect?(resource)
-                                },
-                                onRename: { renamingResource = resource },
-                                onTogglePin: { togglePin(resource) },
-                                onRemove: { onRemove(resource) }
-                            )
+                        if filteredResources.isEmpty {
+                            ResourceEmptyState(title: emptyTitle)
+                                .frame(maxWidth: .infinity, minHeight: compactEmptyState ? 72 : 112)
+                        } else {
+                            ForEach(filteredResources) { resource in
+                                ResourceRowView(
+                                    resource: resource,
+                                    onOpen: { performResourceAction(resource, action: .open) },
+                                    onReveal: { performResourceAction(resource, action: .reveal) },
+                                    onCopy: { performResourceAction(resource, action: .copy) },
+                                    onAlias: { createAlias(for: resource) },
+                                    onReauthorize: { reauthorize(resource) },
+                                    onInspect: {
+                                        onInspect(.resource(resource.id))
+                                        onStatus("Showing info for \(resource.displayName)")
+                                    },
+                                    onSelect: {
+                                        onSelect?(resource)
+                                    },
+                                    onRename: { renamingResource = resource },
+                                    onTogglePin: { togglePin(resource) },
+                                    onRemove: { onRemove(resource) }
+                                )
+                            }
                         }
                     }
                 }
             }
-            .frame(minHeight: 220)
+            .frame(minHeight: effectiveListMinHeight, maxHeight: listMaxHeight)
             .background(.background)
             .overlay {
                 RoundedRectangle(cornerRadius: 8)
@@ -114,6 +122,17 @@ struct ResourceListView: View {
                 onStatus("Renamed MyDesk metadata: \(resource.displayName)")
             }
         }
+    }
+
+    private var effectiveListMinHeight: CGFloat {
+        filteredResources.isEmpty && compactEmptyState ? min(listMinHeight, 112) : listMinHeight
+    }
+
+    private var emptyTitle: String {
+        if let targetFilter {
+            return targetFilter == .folder ? "No folders yet" : "No files yet"
+        }
+        return "No resources yet"
     }
 
     private enum ResourceAction {
@@ -555,6 +574,18 @@ struct ResourcePreviewView: View {
     }
 }
 
+private struct ResourceEmptyState: View {
+    let title: String
+
+    var body: some View {
+        Label(title, systemImage: "tray")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.vertical, 18)
+    }
+}
+
 private struct FolderPreviewRow: View {
     let item: FolderPreviewItem
 
@@ -777,22 +808,26 @@ struct SnippetLibraryView: View {
     let workspaceId: String?
     let onStatus: (String) -> Void
     let onInspect: (InspectorSelection) -> Void
+    let onEdit: (SnippetModel) -> Void
+    let onDelete: (SnippetModel) -> Void
+    var listMinHeight: CGFloat = 220
+    var listMaxHeight: CGFloat?
+    var compactEmptyState = false
     @State private var searchText = ""
     @State private var showingEditor = false
     @State private var pendingRun: CommandRunRequest?
+    @State private var expandedSnippetIDs: Set<String> = []
 
     private var filteredSnippets: [SnippetModel] {
-        let scoped = snippets.filter { snippet in
-            guard let scope else { return true }
-            switch scope {
-            case .global:
-                return snippet.scope == .global
-            case .workspace:
-                return snippet.scope == .global || snippet.workspaceId == workspaceId
-            }
+        let snippetById = Dictionary(uniqueKeysWithValues: snippets.map { ($0.id, $0) })
+        let records = snippets.map {
+            SnippetLibraryRecord(id: $0.id, scope: $0.scopeRaw, workspaceId: $0.workspaceId, title: $0.title, updatedAt: $0.updatedAt)
         }
-        guard !searchText.isEmpty else { return scoped }
-        return scoped.filter {
+        let visible = SnippetLibraryFiltering
+            .visible(records, scope: scope?.rawValue, workspaceId: workspaceId)
+            .compactMap { snippetById[$0.id] }
+        guard !searchText.isEmpty else { return visible }
+        return visible.filter {
             $0.title.localizedCaseInsensitiveContains(searchText) ||
             $0.body.localizedCaseInsensitiveContains(searchText) ||
             $0.details.localizedCaseInsensitiveContains(searchText)
@@ -813,38 +848,35 @@ struct SnippetLibraryView: View {
             }
             TextField("Search snippets", text: $searchText)
                 .textFieldStyle(.roundedBorder)
-            Table(filteredSnippets) {
-                TableColumn("Title") { snippet in
-                    Label(snippet.title, systemImage: snippet.kind == .prompt ? "text.quote" : "terminal")
-                }
-                TableColumn("Kind") { snippet in
-                    Text(snippet.kind.rawValue.capitalized)
-                }
-                TableColumn("Body") { snippet in
-                    Text(snippet.body)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-                TableColumn("Actions") { snippet in
-                    HStack {
-                        Button("Copy") { copy(snippet) }
-                        if snippet.kind == .command {
-                            Button("Terminal") { openTerminal(snippet) }
-                            Button("Run") { prepareRun(snippet) }
-                        }
-                        Button {
-                            onInspect(.snippet(snippet.id))
-                        } label: {
-                            Image(systemName: "info.circle")
+            ScrollView {
+                LazyVStack(spacing: 10) {
+                    if filteredSnippets.isEmpty {
+                        ResourceEmptyState(title: "No snippets yet")
+                            .frame(maxWidth: .infinity, minHeight: compactEmptyState ? 72 : 112)
+                    } else {
+                        ForEach(filteredSnippets) { snippet in
+                            SnippetActionCard(
+                                snippet: snippet,
+                                isExpanded: expandedSnippetIDs.contains(snippet.id),
+                                compact: false,
+                                onToggleExpanded: { toggleSnippet(snippet) },
+                                onCopy: { copy(snippet) },
+                                onEdit: { onEdit(snippet) },
+                                onDelete: { onDelete(snippet) },
+                                onInspect: { onInspect(.snippet(snippet.id)) },
+                                onOpenTerminal: snippet.kind == .command ? { openTerminal(snippet) } : nil,
+                                onRun: snippet.kind == .command ? { prepareRun(snippet) } : nil
+                            )
                         }
                     }
-                    .buttonStyle(.borderless)
                 }
+                .padding(.vertical, 2)
             }
-            .frame(minHeight: 220)
+            .frame(minHeight: effectiveListMinHeight, maxHeight: listMaxHeight)
         }
         .sheet(isPresented: $showingEditor) {
-            SnippetEditor(scope: scope ?? .global, workspaceId: workspaceId) { snippet in
+            SnippetEditor(scope: scope ?? .global, workspaceId: workspaceId) { draft in
+                let snippet = draft.makeSnippet()
                 modelContext.insert(snippet)
                 try? modelContext.save()
                 onStatus("Created snippet: \(snippet.title)")
@@ -866,6 +898,20 @@ struct SnippetLibraryView: View {
         } message: {
             if let pendingRun {
                 Text("\(pendingRun.snippet.body)\n\nWorking directory: \(pendingRun.workingDirectory)")
+            }
+        }
+    }
+
+    private var effectiveListMinHeight: CGFloat {
+        filteredSnippets.isEmpty && compactEmptyState ? min(listMinHeight, 112) : listMinHeight
+    }
+
+    private func toggleSnippet(_ snippet: SnippetModel) {
+        withAnimation(.easeInOut(duration: 0.16)) {
+            if expandedSnippetIDs.contains(snippet.id) {
+                expandedSnippetIDs.remove(snippet.id)
+            } else {
+                expandedSnippetIDs.insert(snippet.id)
             }
         }
     }
@@ -948,11 +994,214 @@ private struct CommandRunRequest {
     let workingDirectory: String
 }
 
+struct SnippetActionCard: View {
+    let snippet: SnippetModel
+    let isExpanded: Bool
+    var compact = false
+    let onToggleExpanded: () -> Void
+    let onCopy: () -> Void
+    let onEdit: () -> Void
+    let onDelete: () -> Void
+    let onInspect: () -> Void
+    let onOpenTerminal: (() -> Void)?
+    let onRun: (() -> Void)?
+    @State private var feedback: String?
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            VStack(alignment: .leading, spacing: compact ? 8 : 10) {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: snippet.kind == .prompt ? "text.quote" : "terminal")
+                        .font(.title3)
+                        .frame(width: 24)
+                        .foregroundStyle(snippet.kind == .prompt ? Color.secondary : Color.accentColor)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(snippet.title)
+                            .font(.headline)
+                            .lineLimit(compact ? 2 : 1)
+                            .minimumScaleFactor(0.8)
+                        Text(snippetSubtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(compact ? 1 : 2)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    if !compact {
+                        actionBar
+                    }
+                }
+
+                if compact {
+                    HStack {
+                        Spacer(minLength: 0)
+                        actionBar
+                    }
+                }
+
+                if isExpanded {
+                    expandedContent
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, minHeight: compact ? 108 : 96, alignment: .topLeading)
+            .background(.thinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .contentShape(Rectangle())
+            .simultaneousGesture(TapGesture(count: 2).onEnded(onToggleExpanded))
+
+            if let feedback {
+                Text(feedback)
+                    .font(.caption2.bold())
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 4)
+                    .background(Color.accentColor.opacity(0.92))
+                    .foregroundStyle(.white)
+                    .clipShape(Capsule())
+                    .padding(.top, 38)
+                    .padding(.trailing, 8)
+                    .transition(.opacity.combined(with: .scale))
+            }
+        }
+        .contextMenu {
+            Button("Copy") {
+                onCopy()
+                showFeedback("Copied")
+            }
+            Button("Edit", action: onEdit)
+            Button(isExpanded ? "Collapse" : "Expand", action: onToggleExpanded)
+            Button("Details", action: onInspect)
+            if let onOpenTerminal {
+                Button("Open Terminal", action: onOpenTerminal)
+            }
+            if let onRun {
+                Button("Run Command", action: onRun)
+            }
+            Button("Delete Snippet", role: .destructive, action: onDelete)
+        }
+    }
+
+    private var actionBar: some View {
+        HStack(spacing: compact ? 4 : 5) {
+            Button(action: onToggleExpanded) {
+                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+            }
+            .buttonStyle(CardIconButtonStyle())
+            .help(isExpanded ? "Collapse snippet" : "Expand snippet")
+
+            Button {
+                onCopy()
+                showFeedback("Copied")
+            } label: {
+                Image(systemName: "doc.on.doc")
+            }
+            .buttonStyle(CardIconButtonStyle())
+            .help("Copy snippet")
+
+            Button(action: onEdit) {
+                Image(systemName: "pencil")
+            }
+            .buttonStyle(CardIconButtonStyle())
+            .help("Edit snippet")
+
+            Button(action: onInspect) {
+                Image(systemName: "info.circle")
+            }
+            .buttonStyle(CardIconButtonStyle())
+            .help("Show details")
+
+            if let onOpenTerminal {
+                Button(action: onOpenTerminal) {
+                    Image(systemName: "terminal")
+                }
+                .buttonStyle(CardIconButtonStyle())
+                .help("Open Terminal")
+            }
+
+            if let onRun {
+                Button(action: onRun) {
+                    Image(systemName: "play.fill")
+                }
+                .buttonStyle(CardIconButtonStyle())
+                .help("Run command")
+            }
+
+            Button(role: .destructive, action: onDelete) {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(CardIconButtonStyle())
+            .help("Delete snippet")
+        }
+    }
+
+    private var expandedContent: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if !snippet.details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(snippet.details)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text(snippet.body.isEmpty ? "No snippet body." : snippet.body)
+                .font(.system(.caption, design: snippet.kind == .command ? .monospaced : .default))
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.top, 2)
+    }
+
+    private var snippetSubtitle: String {
+        let kind = snippet.kind.rawValue.capitalized
+        if snippet.details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return kind
+        }
+        return "\(kind) · \(snippet.details)"
+    }
+
+    private func showFeedback(_ text: String) {
+        withAnimation(.easeOut(duration: 0.12)) {
+            feedback = text
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) {
+            guard feedback == text else { return }
+            withAnimation(.easeIn(duration: 0.16)) {
+                feedback = nil
+            }
+        }
+    }
+}
+
+struct SnippetEditorDraft {
+    var title: String
+    var kind: SnippetKind
+    var body: String
+    var details: String
+    var tags: [String]
+    var scope: WorkbenchScope
+    var workspaceId: String?
+    var requiresConfirmation: Bool
+
+    func makeSnippet() -> SnippetModel {
+        SnippetModel(
+            workspaceId: scope == .workspace ? workspaceId : nil,
+            title: title,
+            kind: kind,
+            body: body,
+            details: details,
+            tags: tags,
+            scope: scope,
+            requiresConfirmation: kind == .command ? requiresConfirmation : false
+        )
+    }
+}
+
 struct SnippetEditor: View {
     @Environment(\.dismiss) private var dismiss
+    let snippet: SnippetModel?
     let scope: WorkbenchScope
     let workspaceId: String?
-    let onSave: (SnippetModel) -> Void
+    let onSave: (SnippetEditorDraft) -> Void
 
     @State private var title = ""
     @State private var kind: SnippetKind = .prompt
@@ -961,9 +1210,27 @@ struct SnippetEditor: View {
     @State private var tags = ""
     @State private var requiresConfirmation = true
 
+    init(
+        snippet: SnippetModel? = nil,
+        scope: WorkbenchScope,
+        workspaceId: String?,
+        onSave: @escaping (SnippetEditorDraft) -> Void
+    ) {
+        self.snippet = snippet
+        self.scope = scope
+        self.workspaceId = workspaceId
+        self.onSave = onSave
+        _title = State(initialValue: snippet?.title ?? "")
+        _kind = State(initialValue: snippet?.kind ?? .prompt)
+        _snippetBody = State(initialValue: snippet?.body ?? "")
+        _details = State(initialValue: snippet?.details ?? "")
+        _tags = State(initialValue: snippet?.tags.joined(separator: ", ") ?? "")
+        _requiresConfirmation = State(initialValue: snippet?.requiresConfirmation ?? true)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("New Snippet")
+            Text(snippet == nil ? "New Snippet" : "Edit Snippet")
                 .font(.title2.bold())
             TextField("Title", text: $title)
             Picker("Kind", selection: $kind) {
@@ -984,17 +1251,17 @@ struct SnippetEditor: View {
                 Spacer()
                 Button("Cancel") { dismiss() }
                 Button("Save") {
-                    let snippet = SnippetModel(
-                        workspaceId: scope == .workspace ? workspaceId : nil,
-                        title: title.isEmpty ? "Untitled Snippet" : title,
+                    let draft = SnippetEditorDraft(
+                        title: title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Untitled Snippet" : title.trimmingCharacters(in: .whitespacesAndNewlines),
                         kind: kind,
                         body: snippetBody,
                         details: details,
-                        tags: tags.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) },
+                        tags: tags.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty },
                         scope: scope,
+                        workspaceId: workspaceId,
                         requiresConfirmation: kind == .command ? requiresConfirmation : false
                     )
-                    onSave(snippet)
+                    onSave(draft)
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
