@@ -68,9 +68,12 @@ public struct ResourceLibraryRecord: Equatable, Identifiable, Sendable {
     public var originalName: String
     public var customName: String
     public var displayPath: String
+    public var lastResolvedPath: String
     public var isPinned: Bool
     public var updatedAt: Date
     public var sortIndex: Int
+    public var scope: String
+    public var workspaceId: String?
 
     public init(
         id: String,
@@ -79,9 +82,12 @@ public struct ResourceLibraryRecord: Equatable, Identifiable, Sendable {
         originalName: String,
         customName: String,
         displayPath: String,
+        lastResolvedPath: String = "",
         isPinned: Bool,
         updatedAt: Date = Date(timeIntervalSince1970: 0),
-        sortIndex: Int = 0
+        sortIndex: Int = 0,
+        scope: String = "global",
+        workspaceId: String? = nil
     ) {
         self.id = id
         self.targetType = targetType
@@ -89,9 +95,12 @@ public struct ResourceLibraryRecord: Equatable, Identifiable, Sendable {
         self.originalName = originalName
         self.customName = customName
         self.displayPath = displayPath
+        self.lastResolvedPath = lastResolvedPath.isEmpty ? displayPath : lastResolvedPath
         self.isPinned = isPinned
         self.updatedAt = updatedAt
         self.sortIndex = sortIndex
+        self.scope = scope
+        self.workspaceId = workspaceId
     }
 
     public var displayName: String {
@@ -1169,6 +1178,45 @@ public enum TodoBoardColumnSplit {
     }
 }
 
+public struct TodoBoardOrderRecord: Equatable, Identifiable, Sendable {
+    public let id: String
+    public let title: String
+    public let isPinned: Bool
+    public let sortIndex: Int
+
+    public init(id: String, title: String, isPinned: Bool, sortIndex: Int) {
+        self.id = id
+        self.title = title
+        self.isPinned = isPinned
+        self.sortIndex = sortIndex
+    }
+}
+
+public enum TodoBoardOrdering {
+    public static func ordered(_ records: [TodoBoardOrderRecord]) -> [TodoBoardOrderRecord] {
+        records.sorted {
+            if $0.isPinned != $1.isPinned { return $0.isPinned && !$1.isPinned }
+            if $0.sortIndex != $1.sortIndex { return $0.sortIndex < $1.sortIndex }
+            return $0.title.localizedStandardCompare($1.title) == .orderedAscending
+        }
+    }
+
+    public static func movedIDs(_ ids: [String], moving movingID: String, to targetID: String) -> [String] {
+        guard movingID != targetID,
+              let sourceIndex = ids.firstIndex(of: movingID),
+              let targetIndex = ids.firstIndex(of: targetID) else {
+            return ids
+        }
+
+        var result = ids
+        let moved = result.remove(at: sourceIndex)
+        let adjustedTargetIndex = result.firstIndex(of: targetID) ?? targetIndex
+        let insertionIndex = sourceIndex < targetIndex ? adjustedTargetIndex + 1 : adjustedTargetIndex
+        result.insert(moved, at: min(insertionIndex, result.count))
+        return result
+    }
+}
+
 public enum CanvasScrollZoomDirection: String, CaseIterable, Identifiable, Sendable {
     case scrollDownZoomsOut
     case scrollDownZoomsIn
@@ -1178,9 +1226,9 @@ public enum CanvasScrollZoomDirection: String, CaseIterable, Identifiable, Senda
     public var title: String {
         switch self {
         case .scrollDownZoomsOut:
-            "向下滚动缩小（当前）"
+            "Scroll down zooms out"
         case .scrollDownZoomsIn:
-            "向下滚动放大"
+            "Scroll down zooms in"
         }
     }
 

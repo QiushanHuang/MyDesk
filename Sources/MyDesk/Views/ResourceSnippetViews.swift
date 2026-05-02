@@ -5,6 +5,11 @@ import SwiftData
 import SwiftUI
 import UniformTypeIdentifiers
 
+struct ResourceWorkspaceUsage: Identifiable, Hashable {
+    let id: String
+    let title: String
+}
+
 struct ResourceListView: View {
     @Environment(\.modelContext) private var modelContext
     let title: String
@@ -18,6 +23,8 @@ struct ResourceListView: View {
     let onStatus: (String) -> Void
     let onInspect: (InspectorSelection) -> Void
     let onRemove: (ResourcePinModel) -> Void
+    var workspaceUsageByResourceID: [String: [ResourceWorkspaceUsage]] = [:]
+    var onSelectWorkspace: ((String) -> Void)?
     var listMinHeight: CGFloat = 220
     var listMaxHeight: CGFloat?
     var compactEmptyState = false
@@ -50,7 +57,8 @@ struct ResourceListView: View {
                 $0.note,
                 $0.tagsText
             ].joined(separator: " ").lowercased() : $0.searchText
-            return cached.contains(query)
+            let usage = workspaceUsageByResourceID[$0.id, default: []].map(\.title).joined(separator: " ").lowercased()
+            return "\(cached) \(usage)".contains(query)
         }
     }
 
@@ -80,6 +88,7 @@ struct ResourceListView: View {
                             ForEach(filteredResources) { resource in
                                 ResourceRowView(
                                     resource: resource,
+                                    workspaceUsage: workspaceUsageByResourceID[resource.id, default: []],
                                     onOpen: { performResourceAction(resource, action: .open) },
                                     onReveal: { performResourceAction(resource, action: .reveal) },
                                     onCopy: { performResourceAction(resource, action: .copy) },
@@ -94,7 +103,8 @@ struct ResourceListView: View {
                                     },
                                     onRename: { renamingResource = resource },
                                     onTogglePin: { togglePin(resource) },
-                                    onRemove: { onRemove(resource) }
+                                    onRemove: { onRemove(resource) },
+                                    onSelectWorkspace: onSelectWorkspace
                                 )
                             }
                         }
@@ -641,6 +651,8 @@ private struct ResourceListHeader: View {
                 .frame(minWidth: 180, maxWidth: 260, alignment: .leading)
             Text("Status")
                 .frame(width: 80, alignment: .leading)
+            Text("Workspaces")
+                .frame(width: 180, alignment: .leading)
             Text("Path")
                 .frame(maxWidth: .infinity, alignment: .leading)
             Text("Actions")
@@ -656,6 +668,7 @@ private struct ResourceListHeader: View {
 
 private struct ResourceRowView: View {
     let resource: ResourcePinModel
+    let workspaceUsage: [ResourceWorkspaceUsage]
     let onOpen: () -> Void
     let onReveal: () -> Void
     let onCopy: () -> Void
@@ -666,6 +679,7 @@ private struct ResourceRowView: View {
     let onRename: () -> Void
     let onTogglePin: () -> Void
     let onRemove: () -> Void
+    let onSelectWorkspace: ((String) -> Void)?
 
     var body: some View {
         HStack(spacing: 10) {
@@ -688,6 +702,12 @@ private struct ResourceRowView: View {
                 .font(.caption)
                 .foregroundStyle(resource.status == .available ? Color.secondary : Color.red)
                 .frame(width: 80, alignment: .leading)
+
+            WorkspaceUsageColumn(
+                usage: workspaceUsage,
+                onSelectWorkspace: onSelectWorkspace
+            )
+            .frame(width: 180, alignment: .leading)
 
             Text(resource.displayPath)
                 .font(.caption)
@@ -744,6 +764,58 @@ private struct ResourceRowView: View {
         }
         .buttonStyle(.borderless)
         .help(help)
+    }
+}
+
+private struct WorkspaceUsageColumn: View {
+    let usage: [ResourceWorkspaceUsage]
+    let onSelectWorkspace: ((String) -> Void)?
+
+    var body: some View {
+        if usage.isEmpty {
+            Text("—")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            HStack(spacing: 0) {
+                let visibleUsage = Array(usage.prefix(2))
+                ForEach(Array(visibleUsage.enumerated()), id: \.element.id) { index, workspace in
+                    Button {
+                        onSelectWorkspace?(workspace.id)
+                    } label: {
+                        Text(workspace.title)
+                            .font(.caption2)
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(onSelectWorkspace == nil ? Color.secondary : Color.accentColor)
+                    .disabled(onSelectWorkspace == nil)
+                    .help("Open workspace: \(workspace.title)")
+
+                    if index < visibleUsage.count - 1 || usage.count > visibleUsage.count {
+                        Text("; ")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if usage.count > 2 {
+                    Menu("+\(usage.count - 2)") {
+                        ForEach(usage.dropFirst(2)) { workspace in
+                            Button(workspace.title) {
+                                onSelectWorkspace?(workspace.id)
+                            }
+                        }
+                    }
+                    .menuStyle(.borderlessButton)
+                    .padding(.leading, 2)
+                    .disabled(onSelectWorkspace == nil)
+                    .help("More workspaces")
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 }
 

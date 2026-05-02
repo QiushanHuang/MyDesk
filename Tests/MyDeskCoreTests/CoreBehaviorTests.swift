@@ -213,6 +213,35 @@ final class CoreBehaviorTests: XCTestCase {
         XCTAssertEqual(TodoBoardColumnSplit.clampedRatio(2), 0.7)
     }
 
+    func testTodoBoardOrderingPinsFirstThenSortsByIndexAndTitle() {
+        let records = [
+            TodoBoardOrderRecord(id: "normal-late", title: "Later", isPinned: false, sortIndex: 10),
+            TodoBoardOrderRecord(id: "pinned-late", title: "Pinned Later", isPinned: true, sortIndex: 20),
+            TodoBoardOrderRecord(id: "pinned-early", title: "Pinned Early", isPinned: true, sortIndex: 5),
+            TodoBoardOrderRecord(id: "normal-early", title: "Early", isPinned: false, sortIndex: 0)
+        ]
+
+        XCTAssertEqual(
+            TodoBoardOrdering.ordered(records).map(\.id),
+            ["pinned-early", "pinned-late", "normal-early", "normal-late"]
+        )
+    }
+
+    func testTodoBoardOrderingMovesIDsWithinCurrentOrder() {
+        XCTAssertEqual(
+            TodoBoardOrdering.movedIDs(["a", "b", "c"], moving: "a", to: "c"),
+            ["b", "c", "a"]
+        )
+        XCTAssertEqual(
+            TodoBoardOrdering.movedIDs(["a", "b", "c"], moving: "c", to: "a"),
+            ["c", "a", "b"]
+        )
+        XCTAssertEqual(
+            TodoBoardOrdering.movedIDs(["a", "b", "c"], moving: "missing", to: "a"),
+            ["a", "b", "c"]
+        )
+    }
+
     func testManifestRoundTripKeepsSchemaVersion() throws {
         let manifest = ExportManifest(
             schemaVersion: 1,
@@ -318,6 +347,99 @@ final class CoreBehaviorTests: XCTestCase {
         XCTAssertEqual(
             ResourceLibraryRecord(id: "b", targetType: "folder", title: "Fallback", originalName: "", customName: "", displayPath: "/tmp/Research", isPinned: false).displayName,
             "Fallback"
+        )
+    }
+
+    func testGlobalResourceLibraryIncludesWorkspaceOnlyResourcesWithUsage() {
+        let resources = [
+            ResourceLibraryRecord(id: "global-plan", targetType: "file", title: "Plan", originalName: "Plan.md", customName: "", displayPath: "/tmp/Plan.md", isPinned: false, updatedAt: Date(timeIntervalSince1970: 10), scope: "global", workspaceId: nil),
+            ResourceLibraryRecord(id: "workspace-plan", targetType: "file", title: "Plan", originalName: "Plan.md", customName: "", displayPath: "/tmp/Plan.md", isPinned: false, updatedAt: Date(timeIntervalSince1970: 20), scope: "workspace", workspaceId: "workspace-a"),
+            ResourceLibraryRecord(id: "workspace-only", targetType: "folder", title: "Research", originalName: "Research", customName: "", displayPath: "/tmp/Research", isPinned: false, updatedAt: Date(timeIntervalSince1970: 30), scope: "workspace", workspaceId: "workspace-b")
+        ]
+        let workspaces = [
+            WorkspaceLibraryRecord(id: "workspace-a", title: "Alpha"),
+            WorkspaceLibraryRecord(id: "workspace-b", title: "Beta")
+        ]
+
+        let records = GlobalResourceLibrary.displayRecords(resources: resources, workspaces: workspaces)
+
+        XCTAssertEqual(records.map(\.resource.id), ["workspace-only", "global-plan"])
+        XCTAssertEqual(records.first { $0.resource.id == "global-plan" }?.workspaceTitles, ["Alpha"])
+        XCTAssertEqual(records.first { $0.resource.id == "workspace-only" }?.workspaceTitles, ["Beta"])
+    }
+
+    func testGlobalResourceLibraryIncludesCanvasResourceUsage() {
+        let resources = [
+            ResourceLibraryRecord(id: "global-md", targetType: "folder", title: "MD", originalName: "MD", customName: "", displayPath: "/tmp/MD", isPinned: false, scope: "global", workspaceId: nil),
+            ResourceLibraryRecord(id: "workspace-md", targetType: "folder", title: "MD", originalName: "MD", customName: "", displayPath: "/tmp/MD", isPinned: false, scope: "workspace", workspaceId: "workspace-a"),
+            ResourceLibraryRecord(id: "venv", targetType: "folder", title: "venv", originalName: "venv", customName: "", displayPath: "/tmp/MD/venv", isPinned: false, scope: "global", workspaceId: nil)
+        ]
+        let workspaces = [
+            WorkspaceLibraryRecord(id: "workspace-a", title: "MD-Simulation"),
+            WorkspaceLibraryRecord(id: "workspace-b", title: "2")
+        ]
+        let canvasUsages = [
+            ResourceCanvasUsageRecord(resourceId: "global-md", workspaceId: "workspace-b"),
+            ResourceCanvasUsageRecord(resourceId: "venv", workspaceId: "workspace-a")
+        ]
+
+        let records = GlobalResourceLibrary.displayRecords(
+            resources: resources,
+            workspaces: workspaces,
+            canvasUsages: canvasUsages
+        )
+
+        XCTAssertEqual(records.first { $0.resource.id == "global-md" }?.workspaceTitles, ["2", "MD-Simulation"])
+        XCTAssertEqual(records.first { $0.resource.id == "venv" }?.workspaceTitles, ["MD-Simulation"])
+    }
+
+    func testGlobalResourceLibraryFiltersByWorkspaceUsage() {
+        let resources = [
+            ResourceLibraryRecord(id: "alpha", targetType: "file", title: "Alpha", originalName: "Alpha.md", customName: "", displayPath: "/tmp/Alpha.md", isPinned: false, scope: "workspace", workspaceId: "workspace-a"),
+            ResourceLibraryRecord(id: "beta", targetType: "file", title: "Beta", originalName: "Beta.md", customName: "", displayPath: "/tmp/Beta.md", isPinned: false, scope: "workspace", workspaceId: "workspace-b")
+        ]
+        let workspaces = [
+            WorkspaceLibraryRecord(id: "workspace-a", title: "Alpha Workspace"),
+            WorkspaceLibraryRecord(id: "workspace-b", title: "Beta Workspace")
+        ]
+
+        let records = GlobalResourceLibrary.displayRecords(resources: resources, workspaces: workspaces, workspaceFilterId: "workspace-b")
+
+        XCTAssertEqual(records.map(\.resource.id), ["beta"])
+        XCTAssertEqual(records.first?.workspaceTitles, ["Beta Workspace"])
+    }
+
+    func testResourceImportDeduplicationKeepsWorkspaceUsageSeparateFromGlobalPins() {
+        let existing = [
+            ResourceImportExistingRecord(id: "global", path: "/tmp/Plan.md", scope: "global", workspaceId: nil),
+            ResourceImportExistingRecord(id: "workspace-a", path: "/tmp/Plan.md", scope: "workspace", workspaceId: "a")
+        ]
+
+        XCTAssertNil(
+            ResourceImportDeduplication.reusableRecordID(
+                forPath: "/tmp/Plan.md",
+                scope: "workspace",
+                workspaceId: "b",
+                existingRecords: existing
+            )
+        )
+        XCTAssertEqual(
+            ResourceImportDeduplication.reusableRecordID(
+                forPath: "/tmp/Plan.md",
+                scope: "workspace",
+                workspaceId: "a",
+                existingRecords: existing
+            ),
+            "workspace-a"
+        )
+        XCTAssertEqual(
+            ResourceImportDeduplication.reusableRecordID(
+                forPath: "/tmp/Plan.md",
+                scope: "global",
+                workspaceId: nil,
+                existingRecords: existing
+            ),
+            "global"
         )
     }
 

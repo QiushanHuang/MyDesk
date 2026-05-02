@@ -10,7 +10,7 @@ struct AppSettingsView: View {
     var body: some View {
         Form {
             Section {
-                Picker("滚轮缩放方向", selection: $scrollZoomDirectionRaw) {
+                Picker("Scroll Zoom Direction", selection: $scrollZoomDirectionRaw) {
                     ForEach(CanvasScrollZoomDirection.allCases) { direction in
                         Text(direction.title)
                             .tag(direction.rawValue)
@@ -18,15 +18,15 @@ struct AppSettingsView: View {
                 }
                 .pickerStyle(.radioGroup)
 
-                Text("控制鼠标滚轮或触控板纵向滚动时画布的缩放方向。双指捏合缩放仍保持系统手势行为。")
+                Text("Controls the canvas zoom direction for mouse wheels and vertical trackpad scrolling. Pinch zoom keeps the system gesture behavior.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
                 Stepper(value: $canvasDefaultZoomPercent, in: 25...500, step: 25) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("默认 100% 对应实际缩放")
-                        Text("\(Int(canvasDefaultZoomPercent.rounded()))% 实际缩放显示为 Canvas 里的 100%")
+                        Text("Default 100% Display Baseline")
+                        Text("\(Int(canvasDefaultZoomPercent.rounded()))% actual zoom is shown as 100% in Canvas")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -36,15 +36,15 @@ struct AppSettingsView: View {
             }
 
             Section {
-                Toggle("默认打开待办页面", isOn: $workspaceCanvasTodoPanelDefaultOpen)
-                Toggle("默认显示已完成栏", isOn: $workspaceCanvasTodoDoneColumnDefaultOpen)
+                Toggle("Open Task Panel By Default", isOn: $workspaceCanvasTodoPanelDefaultOpen)
+                Toggle("Show Done Column By Default", isOn: $workspaceCanvasTodoDoneColumnDefaultOpen)
 
-                Text("这些选项决定进入 Workspace Canvas 时底部待办页面和已完成栏的初始状态；Canvas 内的按钮仍可临时打开或关闭。")
+                Text("These options control the initial state of the bottom task panel and Done column when opening a Workspace Canvas. Canvas controls can still open or close them temporarily.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             } header: {
-                Text("Workspace 待办")
+                Text("Workspace Tasks")
             }
         }
         .formStyle(.grouped)

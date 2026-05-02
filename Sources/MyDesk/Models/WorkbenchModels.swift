@@ -244,31 +244,75 @@ final class SnippetModel {
 final class WorkspaceTodoModel {
     @Attribute(.unique) var id: String
     var workspaceId: String
+    var groupId: String?
     var title: String
+    var details: String = ""
     var isCompleted: Bool
+    var isPinned: Bool = false
     var sortIndex: Int
     var createdAt: Date
     var updatedAt: Date
     var completedAt: Date?
+    var dueAt: Date?
+    var linkedResourceId: String?
+
+    init(
+        id: String = UUID().uuidString,
+        workspaceId: String,
+        groupId: String? = nil,
+        title: String,
+        details: String = "",
+        isCompleted: Bool = false,
+        isPinned: Bool = false,
+        sortIndex: Int = 0,
+        createdAt: Date = .now,
+        updatedAt: Date = .now,
+        completedAt: Date? = nil,
+        dueAt: Date? = nil,
+        linkedResourceId: String? = nil
+    ) {
+        self.id = id
+        self.workspaceId = workspaceId
+        self.groupId = groupId
+        self.title = title
+        self.details = details
+        self.isCompleted = isCompleted
+        self.isPinned = isPinned
+        self.sortIndex = sortIndex
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.completedAt = completedAt
+        self.dueAt = dueAt
+        self.linkedResourceId = linkedResourceId
+    }
+}
+
+@Model
+final class WorkspaceTodoGroupModel {
+    @Attribute(.unique) var id: String
+    var workspaceId: String
+    var title: String
+    var isPinned: Bool = false
+    var sortIndex: Int
+    var createdAt: Date
+    var updatedAt: Date
 
     init(
         id: String = UUID().uuidString,
         workspaceId: String,
         title: String,
-        isCompleted: Bool = false,
+        isPinned: Bool = false,
         sortIndex: Int = 0,
         createdAt: Date = .now,
-        updatedAt: Date = .now,
-        completedAt: Date? = nil
+        updatedAt: Date = .now
     ) {
         self.id = id
         self.workspaceId = workspaceId
         self.title = title
-        self.isCompleted = isCompleted
+        self.isPinned = isPinned
         self.sortIndex = sortIndex
         self.createdAt = createdAt
         self.updatedAt = updatedAt
-        self.completedAt = completedAt
     }
 }
 

@@ -2,18 +2,15 @@
 
 > A native macOS visual workbench for reconnecting files, folders, prompts, commands, and project thinking across complex work systems.
 
-<p>
-  <a href="#english"><strong>English</strong></a>
-  ·
-  <a href="#中文"><strong>中文</strong></a>
-</p>
+[![简体中文](https://img.shields.io/badge/语言-简体中文-1677ff)](#中文)
+[![English](https://img.shields.io/badge/Language-English-24292f)](#english)
 
 ![Platform](https://img.shields.io/badge/platform-macOS%2014%2B-111827)
 ![Swift](https://img.shields.io/badge/Swift-6.0-F05138)
 ![UI](https://img.shields.io/badge/UI-SwiftUI-0A84FF)
 ![Storage](https://img.shields.io/badge/storage-SwiftData-34C759)
 ![License](https://img.shields.io/badge/license-MIT-22C55E)
-![Release](https://img.shields.io/badge/release-v1.2.0-0A84FF)
+![Release](https://img.shields.io/badge/release-v1.3.0-0A84FF)
 
 ---
 
@@ -33,6 +30,7 @@
 - [Build From Source](#build-from-source)
 - [Data, Privacy, and Reliability](#data-privacy-and-reliability)
 - [Release Notes](#release-notes)
+- [What's New in v1.3.0](#whats-new-in-v130)
 - [Project Structure](#project-structure)
 - [Roadmap](#roadmap)
 - [中文说明](#中文)
@@ -86,15 +84,16 @@ This creates a practical middle layer between strict file classification and fre
 | Area | Capability |
 | --- | --- |
 | Home | Reopen recent workspaces, pinned resources, and recent snippets quickly. |
-| Global Library | Keep reusable file and folder sources available across workspaces without automatically pinning everything. |
+| Global Library | Keep reusable file and folder sources available across workspaces, see where each resource is used, and filter by workspace. |
 | Pinned Folders / Files | Keep high-priority resources close, expand folders, copy paths, and open Finder targets. |
 | Snippet Library | Store prompts, commands, text blocks, and operational references. Snippets can be copied, edited, deleted, expanded, and reused in workspaces. |
-| Workspace Canvas | Build visual workflow maps with resource cards, prompt cards, note cards, and organization frames. |
+| Workspace Canvas | Build visual workflow maps with global resources, workspace resources, prompt cards, note cards, and organization frames. |
 | Connections | Draw directional workflow links with visible arrows, animated flow, draggable bend points, lockable anchors, and automatic obstacle avoidance. |
 | Layout | Auto-arrange workflow cards, align selected nodes, resize cards and frames, zoom like a visual board, and box-select groups. |
 | macOS Integration | Open folders in Finder, reveal files, copy full paths, create Finder aliases after confirmation, and prepare command workflows. |
 | Data Portability | Export and import schema-versioned JSON manifests for backup and migration. |
 | Reliability | Uses an app-specific SwiftData store path, startup recovery behavior, backup retention logic, and a regression checklist for core workflows. |
+| Todo Board | Track project tasks in workspace groups with task details, pinned items, DDL dates, and linked resources. |
 
 ### Use Cases
 
@@ -112,14 +111,14 @@ Download the latest package from [GitHub Releases](https://github.com/QiushanHua
 
 Recommended app package:
 
-1. Download `MyDesk-v1.2.0-macOS.dmg`.
+1. Download `MyDesk-v1.3.0-macOS.dmg`.
 2. Open the DMG.
 3. Drag `MyDesk.app` into `Applications`.
 4. Launch `MyDesk` from Applications.
 
 Alternative app archive:
 
-1. Download `MyDesk-v1.2.0-macOS.zip`.
+1. Download `MyDesk-v1.3.0-macOS.zip`.
 2. Unzip it.
 3. Move `MyDesk.app` to `Applications`.
 
@@ -176,13 +175,13 @@ Create release artifacts locally:
 Release artifacts are written to:
 
 ```text
-dist/release/MyDesk-v1.2.0-macOS/artifacts/
+dist/release/MyDesk-v1.3.0-macOS/artifacts/
 ```
 
 The release script creates:
 
-- `MyDesk-v1.2.0-macOS.dmg`
-- `MyDesk-v1.2.0-macOS.zip`
+- `MyDesk-v1.3.0-macOS.dmg`
+- `MyDesk-v1.3.0-macOS.zip`
 - `RELEASE-NOTES.md`
 - `INSTALL.txt`
 - `SHA256SUMS.txt`
@@ -205,20 +204,23 @@ Current data model principles:
 
 ### Release Notes
 
-Current release: `v1.2.0`
+Current release: `v1.3.0`
 
 Highlights:
 
-- More reliable canvas resizing through independent resize handles.
-- Automatic connection routing that avoids cards during layout, link creation, and card movement.
-- Improved link control points, lock/unlock behavior, and obstacle-aware routed segments.
-- Better canvas zoom behavior and default zoom configuration.
-- Settings window for canvas zoom preferences.
-- More stable SwiftData storage bootstrap and backup layout.
-- Expanded snippet editing, copying, and workspace reuse.
-- Professional README and release documentation refresh.
+- Workspace todo groups with task details, pinned tasks, DDL dates, and linked resources.
+- Global Library workspace-usage display with filtering by selected workspace.
+- Safer resource import deduplication across global and workspace scopes.
+- Canvas resource menus that can add global, current-workspace, and other-workspace resources.
+- Refined navigation titles, detail layout, status bar spacing, and README release guidance.
 
-Full release notes are available in [`docs/releases/v1.2.0.md`](docs/releases/v1.2.0.md).
+Full release notes are available in [`docs/releases/v1.3.0.md`](docs/releases/v1.3.0.md).
+
+### What's New in v1.3.0
+
+This release makes MyDesk more useful when the same source material appears across several workspaces. Global Library now shows workspace usage, canvas references count as usage, and the library can be filtered to a specific workspace. Resource import also keeps global and workspace-scoped records separate, so the same path can be reused intentionally without corrupting scope meaning.
+
+The workspace todo board is now closer to a project planning surface: tasks can be grouped, pinned, edited with details, assigned optional DDL dates, and linked back to resources. This keeps next actions attached to the same visual workspace where files, prompts, notes, and workflow connections already live.
 
 ### Project Structure
 
@@ -258,6 +260,7 @@ script/               build, run, and release packaging helpers
 - [从源码构建](#从源码构建)
 - [数据、隐私与稳定性](#数据隐私与稳定性)
 - [版本更新](#版本更新)
+- [v1.3.0 新增内容](#v130-新增内容)
 - [项目结构](#项目结构-1)
 - [路线图](#路线图)
 - [English README](#english)
@@ -311,15 +314,16 @@ flowchart LR
 | 模块 | 功能 |
 | --- | --- |
 | Home | 快速回到最近工作区、Pinned 资源和常用 Snippet。 |
-| Global Library | 统一登记可跨项目复用的文件和文件夹来源，不会默认全部 pin 到侧边栏。 |
+| Global Library | 统一登记可跨项目复用的文件和文件夹来源，展示资源被哪些 Workspace 使用，并支持按 Workspace 筛选。 |
 | Pinned Folders / Files | 把高频文件夹和文件放在侧边栏，可展开、复制路径、进入 Finder。 |
 | Snippet Library | 管理 Prompt、命令、文本片段和操作参考，可复制、编辑、删除、展开全文并复用到工作区。 |
-| Workspace Canvas | 用资源卡片、Prompt 卡片、Note 卡片和 Organization Frame 搭建项目可视化工作流。 |
+| Workspace Canvas | 用全局资源、工作区资源、Prompt 卡片、Note 卡片和 Organization Frame 搭建项目可视化工作流。 |
 | Connections | 方向箭头、蓝色流光、可拖拽控制点、锁定/解锁控制点、自动避开卡片的连接线。 |
 | Layout | 自动布局、对齐、框选、缩放、卡片和组织框自由拉伸。 |
 | macOS 集成 | 打开 Finder 文件夹、定位文件、复制完整路径、确认后创建 Finder alias、配合 Terminal 工作流。 |
 | 数据导入导出 | 使用带 schema version 的 JSON manifest 做备份、迁移和恢复。 |
 | 稳定性 | 独立 SwiftData 存储路径、启动失败提示、备份保留逻辑、功能回归清单和核心测试。 |
+| Todo Board | 在 Workspace 内按 Group 管理任务，支持任务详情、Pinned、DDL 和关联资源。 |
 
 ### 适用场景
 
@@ -337,14 +341,14 @@ flowchart LR
 
 推荐安装方式：
 
-1. 下载 `MyDesk-v1.2.0-macOS.dmg`。
+1. 下载 `MyDesk-v1.3.0-macOS.dmg`。
 2. 打开 DMG。
 3. 将 `MyDesk.app` 拖入 `Applications`。
 4. 从 Applications 启动 MyDesk。
 
 备用方式：
 
-1. 下载 `MyDesk-v1.2.0-macOS.zip`。
+1. 下载 `MyDesk-v1.3.0-macOS.zip`。
 2. 解压。
 3. 将 `MyDesk.app` 移动到 `Applications`。
 
@@ -401,13 +405,13 @@ swift test
 发布产物会生成在：
 
 ```text
-dist/release/MyDesk-v1.2.0-macOS/artifacts/
+dist/release/MyDesk-v1.3.0-macOS/artifacts/
 ```
 
 其中包括：
 
-- `MyDesk-v1.2.0-macOS.dmg`
-- `MyDesk-v1.2.0-macOS.zip`
+- `MyDesk-v1.3.0-macOS.dmg`
+- `MyDesk-v1.3.0-macOS.zip`
 - `RELEASE-NOTES.md`
 - `INSTALL.txt`
 - `SHA256SUMS.txt`
@@ -430,20 +434,23 @@ dist/release/MyDesk-v1.2.0-macOS/artifacts/
 
 ### 版本更新
 
-当前版本：`v1.2.0`
+当前版本：`v1.3.0`
 
 重点更新：
 
-- 修复并强化 Canvas 卡片和 Organization Frame 的拉伸交互。
-- 新增连接线自动避障：自动布局、创建连接线、移动卡片时，连接线会根据当前卡片位置重新规划。
-- 改进连接线控制点、锁定/解锁和带控制点的避障路径。
-- 优化 Canvas 缩放体验和默认 100% zoom 基准设置。
-- 新增 Settings 页面，用于设置 Canvas 滚轮缩放方向和默认 zoom。
-- 改进 SwiftData 存储启动、备份和错误提示。
-- 完善 Snippet 的编辑、复制、展开和工作区复用。
-- 重写 README 与发布说明，使产品定位、痛点和使用方式更加清晰。
+- Workspace Todo Board 支持 Group、任务详情、Pinned、DDL 日期和关联资源。
+- Global Library 会显示资源被哪些 Workspace 使用，并支持按 Workspace 筛选。
+- 修复资源导入去重逻辑，避免全局资源和工作区资源因为相同路径被错误合并。
+- Canvas 添加资源时可以从全局库、当前 Workspace 和其他 Workspace 的资源分组中选择。
+- 改进导航标题、详情页布局、底部状态栏密度和 README 发布说明。
 
-完整更新内容见 [`docs/releases/v1.2.0.md`](docs/releases/v1.2.0.md)。
+完整更新内容见 [`docs/releases/v1.3.0.md`](docs/releases/v1.3.0.md)。
+
+### v1.3.0 新增内容
+
+这个版本重点解决“同一资源在多个 Workspace 中被复用时难以追踪”的问题。Global Library 现在会展示资源的 Workspace 使用关系，Canvas 上引用过的资源也会计入使用关系，并且可以按 Workspace 快速筛选。资源导入时也会区分 global scope 和 workspace scope，避免相同路径在不同语境下被错误合并。
+
+Workspace Todo Board 也从简单任务列表扩展为更接近项目计划的工作区页面。任务可以分组、置顶、填写详情、设置 DDL，并关联到具体资源，让下一步行动和项目里的文件、Prompt、笔记、连接线保持在同一个上下文里。
 
 ### 项目结构
 

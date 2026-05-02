@@ -169,9 +169,13 @@ struct ResourceImportService {
         saveChanges: Bool = true
     ) throws -> ResourceImportSummary {
         let cleanURLs = Array(urls.prefix(200))
-        var resourcesByPath: [String: ResourcePinModel] = [:]
+        var resourcesByImportKey: [String: ResourcePinModel] = [:]
         for resource in existingResources {
-            resourcesByPath[Self.normalizedPath(resource.lastResolvedPath)] = resource
+            resourcesByImportKey[ResourceImportDeduplication.importKey(
+                path: resource.lastResolvedPath,
+                scope: resource.scopeRaw,
+                workspaceId: resource.workspaceId
+            )] = resource
         }
         var imported: [ResourcePinModel] = []
         var insertedCount = 0
@@ -180,8 +184,13 @@ struct ResourceImportService {
         for url in cleanURLs {
             let path = Self.normalizedPath(url.path)
             guard !path.isEmpty else { continue }
+            let importKey = ResourceImportDeduplication.importKey(
+                path: path,
+                scope: scope.rawValue,
+                workspaceId: scope == .workspace ? workspaceId : nil
+            )
 
-            if let existing = resourcesByPath[path] {
+            if let existing = resourcesByImportKey[importKey] {
                 if pinImported, !existing.isPinned {
                     existing.isPinned = true
                     existing.updatedAt = .now
@@ -207,7 +216,7 @@ struct ResourceImportService {
                 customName: ""
             )
             resource.refreshSearchText()
-            resourcesByPath[path] = resource
+            resourcesByImportKey[importKey] = resource
             context.insert(resource)
             imported.append(resource)
             insertedCount += 1

@@ -19,6 +19,7 @@ struct ContentView: View {
     @Query(sort: \ResourcePinModel.updatedAt, order: .reverse) private var resources: [ResourcePinModel]
     @Query(sort: \SnippetModel.updatedAt, order: .reverse) private var snippets: [SnippetModel]
     @Query(sort: \WorkspaceTodoModel.updatedAt, order: .reverse) private var todos: [WorkspaceTodoModel]
+    @Query(sort: \WorkspaceTodoGroupModel.updatedAt, order: .reverse) private var todoGroups: [WorkspaceTodoGroupModel]
     @Query private var canvases: [CanvasModel]
     @Query private var nodes: [CanvasNodeModel]
     @Query private var edges: [CanvasEdgeModel]
@@ -150,6 +151,7 @@ struct ContentView: View {
                 ideal: WorkbenchSidebarMetrics.idealWidth,
                 max: WorkbenchSidebarMetrics.maximumWidth
             )
+            .navigationTitle("MyDesk")
             .toolbar {
                 Button {
                     addWorkspace()
@@ -173,7 +175,7 @@ struct ContentView: View {
                     .frame(width: 300)
                 }
             }
-            .safeAreaInset(edge: .bottom) {
+            .safeAreaInset(edge: .bottom, spacing: 0) {
                 HStack {
                     Text(statusMessage)
                         .font(.caption)
@@ -181,7 +183,7 @@ struct ContentView: View {
                     Spacer()
                 }
                 .padding(.horizontal, 12)
-                .padding(.vertical, 6)
+                .padding(.vertical, 2)
                 .background(.bar)
             }
             .toolbar {
@@ -201,6 +203,7 @@ struct ContentView: View {
                     Label(isInspectorVisible ? "Hide Inspector" : "Show Inspector", systemImage: "sidebar.right")
                 }
             }
+            .navigationTitle(detailNavigationTitle)
             .onAppear {
                 SeedData.seedIfNeeded(context: modelContext, workspaces: workspaces, resources: resources, snippets: snippets, canvases: canvases, nodes: nodes)
             }
@@ -286,6 +289,25 @@ struct ContentView: View {
         isInspectorVisible
     }
 
+    private var detailNavigationTitle: String {
+        switch selection ?? .home {
+        case .home:
+            return "Home"
+        case .global:
+            return "Global Library"
+        case .pinnedFolders:
+            return "Pinned Folders"
+        case .pinnedFiles:
+            return "Pinned Files"
+        case .resource(let id):
+            return resources.first(where: { $0.id == id })?.displayName ?? "Resource"
+        case .snippets:
+            return "Snippet Library"
+        case .workspace(let id):
+            return workspaces.first(where: { $0.id == id })?.title ?? "Workspace"
+        }
+    }
+
     private var orderedWorkspaces: [WorkspaceModel] {
         let records = workspaces.map {
             WorkspaceSidebarOrderRecord(id: $0.id, isPinned: $0.isPinned, sortIndex: $0.sortIndex, updatedAt: $0.updatedAt)
@@ -341,15 +363,19 @@ struct ContentView: View {
         case .global:
             GlobalLibraryView(
                 title: "Global Library",
-                resources: resources.filter { $0.scope == .global },
+                resources: resources,
                 knownResources: resources,
+                workspaces: workspaces,
+                canvases: canvases,
+                nodes: nodes,
                 snippets: snippets.filter { $0.scope == .global },
                 onSelectResource: { selection = .resource($0.id) },
                 onStatus: setStatus,
                 onInspect: showInspector,
                 onRemove: { resourceToRemove = $0 },
                 onEditSnippet: { editingSnippet = $0 },
-                onDeleteSnippet: { snippetToDelete = $0 }
+                onDeleteSnippet: { snippetToDelete = $0 },
+                onSelectWorkspace: { selection = .workspace($0) }
             )
         case .pinnedFolders:
             ResourceListView(
@@ -406,13 +432,19 @@ struct ContentView: View {
                 onEdit: { editingSnippet = $0 },
                 onDelete: { snippetToDelete = $0 }
             )
+            .padding(.horizontal, 24)
+            .padding(.top, 22)
+            .padding(.bottom, 28)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         case .workspace(let id):
             if let workspace = workspaces.first(where: { $0.id == id }) {
                 WorkspaceDetailView(
                     workspace: workspace,
+                    workspaces: workspaces,
                     resources: resources,
                     snippets: snippets,
                     todos: todos,
+                    todoGroups: todoGroups,
                     canvases: canvases,
                     nodes: nodes,
                     edges: edges,
@@ -658,6 +690,7 @@ struct ContentView: View {
             let workspaceResources = resources.filter { $0.scope == .workspace && $0.workspaceId == workspace.id }
             let workspaceSnippets = snippets.filter { $0.scope == .workspace && $0.workspaceId == workspace.id }
             let workspaceTodos = todos.filter { $0.workspaceId == workspace.id }
+            let workspaceTodoGroups = todoGroups.filter { $0.workspaceId == workspace.id }
             let deletedResourceIds = Set(workspaceResources.map(\.id))
             let deletedSnippetIds = Set(workspaceSnippets.map(\.id))
 
@@ -681,6 +714,9 @@ struct ContentView: View {
             }
             for todo in workspaceTodos {
                 modelContext.delete(todo)
+            }
+            for group in workspaceTodoGroups {
+                modelContext.delete(group)
             }
             modelContext.delete(workspace)
             try modelContext.save()
@@ -1316,6 +1352,9 @@ struct GlobalLibraryView: View {
     let title: String
     let resources: [ResourcePinModel]
     let knownResources: [ResourcePinModel]
+    let workspaces: [WorkspaceModel]
+    let canvases: [CanvasModel]
+    let nodes: [CanvasNodeModel]
     let snippets: [SnippetModel]
     let onSelectResource: (ResourcePinModel) -> Void
     let onStatus: (String) -> Void
@@ -1323,15 +1362,67 @@ struct GlobalLibraryView: View {
     let onRemove: (ResourcePinModel) -> Void
     let onEditSnippet: (SnippetModel) -> Void
     let onDeleteSnippet: (SnippetModel) -> Void
+    let onSelectWorkspace: (String) -> Void
+    @State private var workspaceFilterId = ""
+
+    private var selectedWorkspaceFilterId: String? {
+        workspaceFilterId.isEmpty ? nil : workspaceFilterId
+    }
+
+    private var displayRecords: [GlobalResourceLibraryRecord] {
+        GlobalResourceLibrary.displayRecords(
+            resources: resources.map(resourceLibraryRecord),
+            workspaces: workspaces.map { WorkspaceLibraryRecord(id: $0.id, title: $0.title) },
+            canvasUsages: canvasResourceUsageRecords,
+            workspaceFilterId: selectedWorkspaceFilterId
+        )
+    }
+
+    private var displayResources: [ResourcePinModel] {
+        let resourceById = Dictionary(uniqueKeysWithValues: resources.map { ($0.id, $0) })
+        return displayRecords.compactMap { resourceById[$0.resource.id] }
+    }
+
+    private var workspaceUsageByResourceID: [String: [ResourceWorkspaceUsage]] {
+        Dictionary(uniqueKeysWithValues: displayRecords.map { record in
+            let usage = zip(record.workspaceIDs, record.workspaceTitles).map {
+                ResourceWorkspaceUsage(id: $0.0, title: $0.1)
+            }
+            return (record.resource.id, usage)
+        })
+    }
+
+    private var canvasResourceUsageRecords: [ResourceCanvasUsageRecord] {
+        let workspaceIdByCanvasId = Dictionary(uniqueKeysWithValues: canvases.map { ($0.id, $0.workspaceId) })
+        return nodes.compactMap { node in
+            guard node.objectType == "resourcePin",
+                  let resourceId = node.objectId,
+                  let workspaceId = workspaceIdByCanvasId[node.canvasId] else {
+                return nil
+            }
+            return ResourceCanvasUsageRecord(resourceId: resourceId, workspaceId: workspaceId)
+        }
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                Text(title)
-                    .font(.title.bold())
+                HStack {
+                    Text(title)
+                        .font(.title.bold())
+                    Spacer()
+                    Picker("Used By", selection: $workspaceFilterId) {
+                        Text("All Workspaces").tag("")
+                        ForEach(workspaces) { workspace in
+                            Text(workspace.title).tag(workspace.id)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .frame(width: 220)
+                }
                 ResourceListView(
                     title: "Folders",
-                    resources: resources,
+                    resources: displayResources,
                     knownResources: knownResources,
                     scope: .global,
                     workspaceId: nil,
@@ -1341,13 +1432,15 @@ struct GlobalLibraryView: View {
                     onStatus: onStatus,
                     onInspect: onInspect,
                     onRemove: onRemove,
+                    workspaceUsageByResourceID: workspaceUsageByResourceID,
+                    onSelectWorkspace: onSelectWorkspace,
                     listMinHeight: 122,
                     listMaxHeight: 240,
                     compactEmptyState: true
                 )
                 ResourceListView(
                     title: "Files",
-                    resources: resources,
+                    resources: displayResources,
                     knownResources: knownResources,
                     scope: .global,
                     workspaceId: nil,
@@ -1357,6 +1450,8 @@ struct GlobalLibraryView: View {
                     onStatus: onStatus,
                     onInspect: onInspect,
                     onRemove: onRemove,
+                    workspaceUsageByResourceID: workspaceUsageByResourceID,
+                    onSelectWorkspace: onSelectWorkspace,
                     listMinHeight: 122,
                     listMaxHeight: 240,
                     compactEmptyState: true
@@ -1383,14 +1478,33 @@ struct GlobalLibraryView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
+
+    private func resourceLibraryRecord(for resource: ResourcePinModel) -> ResourceLibraryRecord {
+        ResourceLibraryRecord(
+            id: resource.id,
+            targetType: resource.targetTypeRaw,
+            title: resource.title,
+            originalName: resource.originalName,
+            customName: resource.customName,
+            displayPath: resource.displayPath,
+            lastResolvedPath: resource.lastResolvedPath,
+            isPinned: resource.isPinned,
+            updatedAt: resource.updatedAt,
+            sortIndex: resource.sortIndex,
+            scope: resource.scopeRaw,
+            workspaceId: resource.workspaceId
+        )
+    }
 }
 
 struct WorkspaceDetailView: View {
     @Environment(\.modelContext) private var modelContext
     let workspace: WorkspaceModel
+    let workspaces: [WorkspaceModel]
     let resources: [ResourcePinModel]
     let snippets: [SnippetModel]
     let todos: [WorkspaceTodoModel]
+    let todoGroups: [WorkspaceTodoGroupModel]
     let canvases: [CanvasModel]
     let nodes: [CanvasNodeModel]
     let edges: [CanvasEdgeModel]
@@ -1426,6 +1540,10 @@ struct WorkspaceDetailView: View {
 
     private var workspaceTodos: [WorkspaceTodoModel] {
         todos.filter { $0.workspaceId == workspace.id }
+    }
+
+    private var workspaceTodoGroups: [WorkspaceTodoGroupModel] {
+        todoGroups.filter { $0.workspaceId == workspace.id }
     }
 
     private var workspaceCanvas: CanvasModel? {
@@ -1476,8 +1594,11 @@ struct WorkspaceDetailView: View {
                     WorkspaceCanvasView(
                         canvas: canvas,
                         resources: workspaceResources,
+                        allResources: resources,
+                        workspaces: workspaces,
                         snippets: workspaceSnippets,
                         todos: workspaceTodos,
+                        todoGroups: workspaceTodoGroups,
                         nodes: nodes.filter { $0.canvasId == canvas.id },
                         edges: edges.filter { $0.canvasId == canvas.id },
                         onStatus: onStatus,
@@ -1492,7 +1613,10 @@ struct WorkspaceDetailView: View {
                 }
             }
         }
-        .padding()
+        .padding(.horizontal)
+        .padding(.bottom, 0)
+        .padding(.top, 4)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear {
             onCanvasTabActiveChange(tab == "Canvas")
             ensureCanvas()

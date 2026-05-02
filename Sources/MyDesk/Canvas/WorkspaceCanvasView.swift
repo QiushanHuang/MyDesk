@@ -174,6 +174,12 @@ private struct CanvasNodeDragSnapshot {
     let rect: CanvasFrameRect
 }
 
+private struct WorkspaceResourceMenuGroup {
+    let workspaceId: String
+    let title: String
+    let resources: [ResourcePinModel]
+}
+
 struct WorkspaceCanvasView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -184,8 +190,11 @@ struct WorkspaceCanvasView: View {
     @AppStorage(AppPreferenceKeys.workspaceCanvasTodoDoneColumnOpen) private var isTodoDoneColumnOpen = false
     let canvas: CanvasModel
     let resources: [ResourcePinModel]
+    let allResources: [ResourcePinModel]
+    let workspaces: [WorkspaceModel]
     let snippets: [SnippetModel]
     let todos: [WorkspaceTodoModel]
+    let todoGroups: [WorkspaceTodoGroupModel]
     let nodes: [CanvasNodeModel]
     let edges: [CanvasEdgeModel]
     let onStatus: (String) -> Void
@@ -209,6 +218,7 @@ struct WorkspaceCanvasView: View {
     @State private var isCanvasInspectorVisible = false
     @State private var isTodoPanelOpen = true
     @State private var isTodoPanelInitialized = false
+    @State private var didAlignLeftRailScroll = false
     @State private var edgeControlDragStart: [String: CGPoint] = [:]
     @State private var transientEdgeControlPoints: [String: CGPoint] = [:]
     @State private var frameDragControlPointEdgeIDs: Set<String> = []
@@ -247,7 +257,7 @@ struct WorkspaceCanvasView: View {
     }
 
     private var resourcesById: [String: ResourcePinModel] {
-        Dictionary(uniqueKeysWithValues: resources.map { ($0.id, $0) })
+        Dictionary(uniqueKeysWithValues: allResources.map { ($0.id, $0) })
     }
 
     private var snippetsById: [String: SnippetModel] {
@@ -272,30 +282,77 @@ struct WorkspaceCanvasView: View {
     }
 
     private var renderSnapshot: CanvasRenderSnapshot {
-        CanvasRenderSnapshot(nodes: workflowNodes, resources: resources, snippets: snippets, edges: edges)
+        CanvasRenderSnapshot(nodes: workflowNodes, resources: allResources, snippets: snippets, edges: edges)
+    }
+
+    private var globalResources: [ResourcePinModel] {
+        orderedResourceMenuItems(allResources.filter { $0.scope == .global })
+    }
+
+    private var currentWorkspaceResources: [ResourcePinModel] {
+        orderedResourceMenuItems(allResources.filter { $0.scope == .workspace && $0.workspaceId == canvas.workspaceId })
+    }
+
+    private var otherWorkspaceResourceGroups: [WorkspaceResourceMenuGroup] {
+        let titleByWorkspaceId = Dictionary(uniqueKeysWithValues: workspaces.map { ($0.id, $0.title) })
+        let grouped = Dictionary(grouping: allResources.filter { $0.scope == .workspace && $0.workspaceId != canvas.workspaceId }) {
+            $0.workspaceId ?? ""
+        }
+        return grouped
+            .filter { !$0.key.isEmpty }
+            .map { workspaceId, resources in
+                WorkspaceResourceMenuGroup(
+                    workspaceId: workspaceId,
+                    title: titleByWorkspaceId[workspaceId] ?? workspaceId,
+                    resources: orderedResourceMenuItems(resources)
+                )
+            }
+            .sorted {
+                let comparison = $0.title.localizedStandardCompare($1.title)
+                if comparison != .orderedSame { return comparison == .orderedAscending }
+                return $0.workspaceId < $1.workspaceId
+            }
+    }
+
+    private func orderedResourceMenuItems(_ resources: [ResourcePinModel]) -> [ResourcePinModel] {
+        resources.sorted {
+            let nameComparison = $0.displayName.localizedStandardCompare($1.displayName)
+            if nameComparison != .orderedSame {
+                return nameComparison == .orderedAscending
+            }
+            return $0.id < $1.id
+        }
     }
 
     var body: some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 12) {
-                canvasLeftRail
-                    .frame(width: 196)
-                canvasSurface
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                if isCanvasInspectorVisible {
-                    canvasRightRail
-                        .frame(width: 244)
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
-                }
-            }
+        GeometryReader { proxy in
+            let taskPanelHeight = todoPanelHeight(for: proxy.size.height)
 
-            WorkspaceTodoBoardView(
-                workspaceId: canvas.workspaceId,
-                todos: todos,
-                isOpen: $isTodoPanelOpen,
-                isDoneColumnOpen: $isTodoDoneColumnOpen,
-                onStatus: onStatus
-            )
+            VStack(spacing: 10) {
+                HStack(spacing: 12) {
+                    canvasLeftRail
+                        .frame(width: 196)
+                    canvasSurface
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    if isCanvasInspectorVisible {
+                        canvasRightRail
+                            .frame(width: 244)
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                    }
+                }
+
+                WorkspaceTodoBoardView(
+                    workspaceId: canvas.workspaceId,
+                    resources: resources,
+                    todos: todos,
+                    groups: todoGroups,
+                    isOpen: $isTodoPanelOpen,
+                    isDoneColumnOpen: $isTodoDoneColumnOpen,
+                    onStatus: onStatus,
+                    expandedHeight: taskPanelHeight
+                )
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .animation(.easeInOut(duration: 0.16), value: isCanvasInspectorVisible)
@@ -314,141 +371,187 @@ struct WorkspaceCanvasView: View {
         }
     }
 
+    private func todoPanelHeight(for availableHeight: CGFloat) -> CGFloat {
+        guard isTodoPanelOpen else { return 42 }
+        return min(220, max(120, availableHeight * 0.16))
+    }
+
     private var canvasLeftRail: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top, spacing: 8) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Canvas")
-                        .font(.headline)
-                    Text("Place resources and connect the workflow.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                Color.clear
+                    .frame(height: 0)
+                    .id("canvas-left-rail-top")
+
+                HStack(alignment: .top, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Canvas")
+                            .font(.headline)
+                        Text("Place resources and connect the workflow.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 4)
+                    Button {
+                        isCanvasInspectorVisible.toggle()
+                    } label: {
+                        Image(systemName: "sidebar.right")
+                            .frame(width: 24, height: 24)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(isCanvasInspectorVisible ? .accentColor : nil)
+                    .help(isCanvasInspectorVisible ? "Hide canvas inspector" : "Show canvas inspector")
                 }
-                Spacer(minLength: 4)
+
                 Button {
-                    isCanvasInspectorVisible.toggle()
+                    isTodoPanelOpen.toggle()
                 } label: {
-                    Image(systemName: "sidebar.right")
-                        .frame(width: 24, height: 24)
+                    Label(isTodoPanelOpen ? "Close Todo Page" : "Open Todo Page", systemImage: "checklist")
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(.bordered)
-                .tint(isCanvasInspectorVisible ? .accentColor : nil)
-                .help(isCanvasInspectorVisible ? "Hide canvas inspector" : "Show canvas inspector")
-            }
+                .tint(isTodoPanelOpen ? .accentColor : nil)
+                .help(isTodoPanelOpen ? "Close workspace todo page" : "Open workspace todo page")
 
-            Button {
-                isTodoPanelOpen.toggle()
-            } label: {
-                Label(isTodoPanelOpen ? "Close Todo Page" : "Open Todo Page", systemImage: "checklist")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(.bordered)
-            .tint(isTodoPanelOpen ? .accentColor : nil)
-            .help(isTodoPanelOpen ? "Close workspace todo page" : "Open workspace todo page")
-
-            GroupBox("Add") {
-                VStack(alignment: .leading, spacing: 8) {
-                    Menu {
-                        ForEach(resources) { resource in
-                            Button(resource.title) { addResourceNode(resource) }
-                        }
-                    } label: {
-                        Label("Resource", systemImage: "folder.badge.plus")
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .disabled(resources.isEmpty)
-
-                    Menu {
-                        ForEach(snippets) { snippet in
-                            Button(snippet.title) { addSnippetNode(snippet) }
-                        }
-                    } label: {
-                        Label("Prompt / Command", systemImage: "text.badge.plus")
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .disabled(snippets.isEmpty)
-
-                    Button {
-                        addNoteNode()
-                    } label: {
-                        Label("Note", systemImage: "note.text.badge.plus")
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-
-                    Button {
-                        addFrameNode()
-                    } label: {
-                        Label("Organization Frame", systemImage: "rectangle.dashed")
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-                .buttonStyle(.bordered)
-            }
-
-            GroupBox("Mode") {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(CanvasInteractionMode.allCases) { item in
-                        Button {
-                            mode = item
-                            selectionRect = nil
-                            connectionSourceNodeId = nil
+                GroupBox("Add") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Menu {
+                            resourceMenuSection(title: "Global Library", resources: globalResources)
+                            if !currentWorkspaceResources.isEmpty {
+                                Divider()
+                                resourceMenuSection(title: "Current Workspace", resources: currentWorkspaceResources)
+                            }
+                            if !otherWorkspaceResourceGroups.isEmpty {
+                                Divider()
+                                ForEach(otherWorkspaceResourceGroups, id: \.workspaceId) { group in
+                                    Menu(group.title) {
+                                        ForEach(group.resources) { resource in
+                                            Button(resource.displayName) { addResourceNode(resource) }
+                                        }
+                                    }
+                                }
+                            }
                         } label: {
-                            Label(item.title, systemImage: item.systemImage)
+                            Label("Resource", systemImage: "folder.badge.plus")
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        .buttonStyle(.bordered)
-                        .tint(mode == item ? .accentColor : nil)
+                        .disabled(allResources.isEmpty)
+
+                        Menu {
+                            ForEach(snippets) { snippet in
+                                Button(snippet.title) { addSnippetNode(snippet) }
+                            }
+                        } label: {
+                            Label("Prompt / Command", systemImage: "text.badge.plus")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .disabled(snippets.isEmpty)
+
+                        Button {
+                            addNoteNode()
+                        } label: {
+                            Label("Note", systemImage: "note.text.badge.plus")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+
+                        Button {
+                            addFrameNode()
+                        } label: {
+                            Label("Organization Frame", systemImage: "rectangle.dashed")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                GroupBox("Mode") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(CanvasInteractionMode.allCases) { item in
+                            Button {
+                                mode = item
+                                selectionRect = nil
+                                connectionSourceNodeId = nil
+                            } label: {
+                                Label(item.title, systemImage: item.systemImage)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(mode == item ? .accentColor : nil)
+                        }
                     }
                 }
-            }
 
-            GroupBox("Zoom") {
-                HStack {
-                    Button {
-                        setZoom(effectiveZoom - zoomBaseline * CanvasNodeMetrics.zoomDisplayStep)
-                    } label: {
-                        Image(systemName: "minus.magnifyingglass")
+                GroupBox("Zoom") {
+                    HStack {
+                        Button {
+                            setZoom(effectiveZoom - zoomBaseline * CanvasNodeMetrics.zoomDisplayStep)
+                        } label: {
+                            Image(systemName: "minus.magnifyingglass")
+                        }
+                        Button {
+                            setZoom(zoomBaseline)
+                        } label: {
+                            Text("\(CanvasZoomScale.displayPercent(forZoom: effectiveZoom, baseline: zoomBaseline))%")
+                                .monospacedDigit()
+                        }
+                        .help("Reset canvas scale to 100%")
+                        Button {
+                            setZoom(effectiveZoom + zoomBaseline * CanvasNodeMetrics.zoomDisplayStep)
+                        } label: {
+                            Image(systemName: "plus.magnifyingglass")
+                        }
                     }
-                    Button {
-                        setZoom(zoomBaseline)
-                    } label: {
-                        Text("\(CanvasZoomScale.displayPercent(forZoom: effectiveZoom, baseline: zoomBaseline))%")
-                            .monospacedDigit()
-                    }
-                    .help("Reset canvas scale to 100%")
-                    Button {
-                        setZoom(effectiveZoom + zoomBaseline * CanvasNodeMetrics.zoomDisplayStep)
-                    } label: {
-                        Image(systemName: "plus.magnifyingglass")
-                    }
+                    .buttonStyle(.bordered)
                 }
-                .buttonStyle(.bordered)
-            }
 
-            GroupBox("Glow") {
-                Picker("Glow", selection: Binding(
-                    get: { glowTheme },
-                    set: { theme in
-                        canvas.linkAnimationThemeRaw = theme.rawValue
-                        canvas.animationsEnabled = theme != .off
-                        canvas.updatedAt = .now
-                        try? modelContext.save()
+                GroupBox("Glow") {
+                    Picker("Glow", selection: Binding(
+                        get: { glowTheme },
+                        set: { theme in
+                            canvas.linkAnimationThemeRaw = theme.rawValue
+                            canvas.animationsEnabled = theme != .off
+                            canvas.updatedAt = .now
+                            try? modelContext.save()
+                        }
+                    )) {
+                        ForEach(CanvasGlowTheme.allCases) { theme in
+                            Text(theme.title).tag(theme)
+                        }
                     }
-                )) {
-                    ForEach(CanvasGlowTheme.allCases) { theme in
-                        Text(theme.title).tag(theme)
-                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
             }
-
-            Spacer()
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+            .defaultScrollAnchor(.top)
+            .onAppear {
+            guard !didAlignLeftRailScroll else { return }
+            didAlignLeftRailScroll = true
+            DispatchQueue.main.async {
+                proxy.scrollTo("canvas-left-rail-top", anchor: .top)
+            }
         }
-        .padding(12)
+        }
         .background(.thinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    @ViewBuilder
+    private func resourceMenuSection(title: String, resources: [ResourcePinModel]) -> some View {
+        if resources.isEmpty {
+            Text("\(title): None")
+                .foregroundStyle(.secondary)
+        } else {
+            Menu(title) {
+                ForEach(resources) { resource in
+                    Button(resource.displayName) { addResourceNode(resource) }
+                }
+            }
+        }
     }
 
     private var canvasRightRail: some View {
@@ -509,6 +612,22 @@ struct WorkspaceCanvasView: View {
                 .buttonStyle(.bordered)
             }
 
+            GroupBox("Card Color") {
+                VStack(alignment: .leading, spacing: 8) {
+                    if let selectedNode {
+                        CanvasCardColorEditor(
+                            styleRaw: selectedNode.accentColorRaw,
+                            onStyleChange: { updateNodeColor(selectedNode, to: $0) }
+                        )
+                    } else {
+                        Text("Select one card to edit its color.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+
             GroupBox("Layout") {
                 VStack(alignment: .leading, spacing: 8) {
                     Button { alignLeft() } label: {
@@ -563,8 +682,6 @@ struct WorkspaceCanvasView: View {
                         onCopy: { performCardButtonAction(node) { copyNodePayload(node) } },
                         onConnect: { performCardButtonAction(node) { connectButtonTapped(node) } },
                         onDelete: { performCardButtonAction(node) { delete(node) } },
-                        onColorControlActivate: { performCardButtonAction(node) {} },
-                        onColorChange: { updateNodeColor(node, to: $0) },
                         onTitleChange: { updateNodeTitle(node, to: $0) },
                         onNoteChange: { updateNodeBody(node, to: $0) }
                     )
@@ -614,8 +731,6 @@ struct WorkspaceCanvasView: View {
                         onConnect: { performCardButtonAction(node) { connectButtonTapped(node) } },
                         onToggleNote: { performCardButtonAction(node) { toggleNote(for: node) } },
                         onDelete: { performCardButtonAction(node) { delete(node) } },
-                        onColorControlActivate: { performCardButtonAction(node) {} },
-                        onColorChange: { updateNodeColor(node, to: $0) },
                         onTitleChange: { updateNodeTitle(node, to: $0) },
                         onNoteChange: { updateNodeBody(node, to: $0) }
                     )
@@ -1816,40 +1931,6 @@ private extension CanvasNodeColorStyle {
     }
 }
 
-private struct CanvasCardColorControl: View {
-    let styleRaw: String
-    let onActivate: () -> Void
-    let onStyleChange: (String) -> Void
-    @State private var isPresented = false
-
-    private var style: CanvasNodeColorStyle? {
-        CanvasNodeColorStyle(rawValue: styleRaw)
-    }
-
-    var body: some View {
-        Button {
-            onActivate()
-            isPresented.toggle()
-        } label: {
-            ZStack {
-                CanvasSharpSymbol(systemName: "paintpalette", pointSize: 12, weight: .semibold)
-                    .frame(width: 13, height: 13)
-                if let style {
-                    Circle()
-                        .fill(style.cardFill)
-                        .frame(width: 8, height: 8)
-                        .offset(x: 5, y: 5)
-                }
-            }
-        }
-        .buttonStyle(CardIconButtonStyle(isActive: style != nil))
-        .help("Card color")
-        .popover(isPresented: $isPresented, arrowEdge: .bottom) {
-            CanvasCardColorEditor(styleRaw: styleRaw, onStyleChange: onStyleChange)
-        }
-    }
-}
-
 private struct CanvasCardColorEditor: View {
     let styleRaw: String
     let onStyleChange: (String) -> Void
@@ -1865,8 +1946,19 @@ private struct CanvasCardColorEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Card Color")
-                    .font(.headline)
+                if let style {
+                    Circle()
+                        .fill(style.cardFill)
+                        .frame(width: 18, height: 18)
+                        .overlay {
+                            Circle()
+                                .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
+                        }
+                } else {
+                    Image(systemName: "paintpalette")
+                        .foregroundStyle(.secondary)
+                        .frame(width: 18, height: 18)
+                }
                 Spacer()
                 Button("Reset") {
                     onStyleChange("")
@@ -1910,7 +2002,12 @@ private struct CanvasCardColorEditor: View {
                                 .stroke(Color.red.opacity(0.6), lineWidth: 1)
                         }
                     }
-                Button("Apply", action: applyColorCode)
+                Button {
+                    applyColorCode()
+                } label: {
+                    Image(systemName: "checkmark")
+                }
+                .help("Apply color code")
             }
 
             HStack(spacing: 10) {
@@ -1926,8 +2023,7 @@ private struct CanvasCardColorEditor: View {
                     .frame(width: 38, alignment: .trailing)
             }
         }
-        .padding(14)
-        .frame(width: 260)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .onAppear {
             syncFromRawValue(styleRaw)
         }
@@ -1989,8 +2085,6 @@ struct CanvasNodeCard: View {
     let onConnect: () -> Void
     let onToggleNote: () -> Void
     let onDelete: () -> Void
-    let onColorControlActivate: () -> Void
-    let onColorChange: (String) -> Void
     let onTitleChange: (String) -> Void
     let onNoteChange: (String) -> Void
     @State private var feedback: String?
@@ -2093,7 +2187,6 @@ struct CanvasNodeCard: View {
             )
             .frame(width: chromeTextWidth(subtitle, fontSize: 12.5, weight: .semibold), height: 16, alignment: .leading)
             Spacer(minLength: 6)
-            CanvasCardColorControl(styleRaw: node.accentColorRaw, onActivate: onColorControlActivate, onStyleChange: onColorChange)
             Button {
                 triggerFeedback("Copied") {
                     onCopy()
@@ -2903,8 +2996,6 @@ struct CanvasFrameCard: View {
     let onCopy: () -> Void
     let onConnect: () -> Void
     let onDelete: () -> Void
-    let onColorControlActivate: () -> Void
-    let onColorChange: (String) -> Void
     let onTitleChange: (String) -> Void
     let onNoteChange: (String) -> Void
     @State private var feedback: String?
@@ -2920,7 +3011,6 @@ struct CanvasFrameCard: View {
                         .font(.headline)
                         .lineLimit(1)
                     Spacer()
-                    CanvasCardColorControl(styleRaw: node.accentColorRaw, onActivate: onColorControlActivate, onStyleChange: onColorChange)
                     Button {
                         triggerFeedback("Copied") {
                             onCopy()

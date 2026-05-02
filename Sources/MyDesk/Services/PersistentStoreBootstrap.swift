@@ -18,6 +18,7 @@ enum PersistentStoreBootstrap {
             ResourcePinModel.self,
             SnippetModel.self,
             WorkspaceTodoModel.self,
+            WorkspaceTodoGroupModel.self,
             CanvasModel.self,
             CanvasNodeModel.self,
             CanvasEdgeModel.self,

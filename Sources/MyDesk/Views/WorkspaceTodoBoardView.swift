@@ -2,26 +2,29 @@ import MyDeskCore
 import SwiftData
 import SwiftUI
 
+private let defaultTodoGroupTitle = "Default"
+
 struct WorkspaceTodoBoardView: View {
     @Environment(\.modelContext) private var modelContext
     @AppStorage(AppPreferenceKeys.workspaceCanvasTodoColumnRatio) private var columnRatio = TodoBoardColumnSplit.defaultRatio
 
     let workspaceId: String
+    let resources: [ResourcePinModel]
     let todos: [WorkspaceTodoModel]
+    let groups: [WorkspaceTodoGroupModel]
     @Binding var isOpen: Bool
     @Binding var isDoneColumnOpen: Bool
     let onStatus: (String) -> Void
+    var expandedHeight: CGFloat = 300
+    var collapsedHeight: CGFloat = 42
 
-    @State private var draftTitle = ""
+    @State private var selectedGroupId: String?
+    @State private var editingGroupId: String?
+    @State private var editingTodo: WorkspaceTodoModel?
     @State private var dragStartRatio: Double?
 
     private var openTodos: [WorkspaceTodoModel] {
-        todos
-            .filter { !$0.isCompleted }
-            .sorted {
-                if $0.sortIndex != $1.sortIndex { return $0.sortIndex < $1.sortIndex }
-                return $0.createdAt < $1.createdAt
-            }
+        orderedTodos(todos.filter { !$0.isCompleted })
     }
 
     private var completedTodos: [WorkspaceTodoModel] {
@@ -31,8 +34,29 @@ struct WorkspaceTodoBoardView: View {
                 let lhs = $0.completedAt ?? $0.updatedAt
                 let rhs = $1.completedAt ?? $1.updatedAt
                 if lhs != rhs { return lhs > rhs }
-                return $0.title < $1.title
+                return $0.title.localizedStandardCompare($1.title) == .orderedAscending
             }
+    }
+
+    private var orderedGroups: [WorkspaceTodoGroupModel] {
+        let records = groups.map {
+            TodoBoardOrderRecord(id: $0.id, title: $0.title, isPinned: $0.isPinned, sortIndex: $0.sortIndex)
+        }
+        let orderedIDs = TodoBoardOrdering.ordered(records).map(\.id)
+        let byID = Dictionary(uniqueKeysWithValues: groups.map { ($0.id, $0) })
+        return orderedIDs.compactMap { byID[$0] }
+    }
+
+    private var selectedGroup: WorkspaceTodoGroupModel? {
+        if let selectedGroupId, let group = groups.first(where: { $0.id == selectedGroupId }) {
+            return group
+        }
+        return orderedGroups.first
+    }
+
+    private var selectedOpenTodos: [WorkspaceTodoModel] {
+        guard let group = selectedGroup else { return [] }
+        return orderedTodos(openTodos.filter { groupId(for: $0) == group.id })
     }
 
     var body: some View {
@@ -45,32 +69,57 @@ struct WorkspaceTodoBoardView: View {
         }
         .padding(isOpen ? 10 : 8)
         .frame(maxWidth: .infinity)
-        .frame(height: isOpen ? 244 : 42)
+        .frame(height: isOpen ? expandedHeight : collapsedHeight)
         .background(.thinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 10))
+        .onAppear {
+            let group = ensureDefaultGroup()
+            if selectedGroupId == nil {
+                selectedGroupId = group.id
+            }
+        }
+        .sheet(item: $editingTodo) { todo in
+            WorkspaceTodoDetailView(todo: todo, resources: resources, onSave: {
+                save(status: "Updated task")
+            })
+        }
     }
 
     private var header: some View {
         HStack(spacing: 10) {
-            Label("待办", systemImage: "checklist")
+            Label("Tasks", systemImage: "checklist")
                 .font(.headline)
-            Text("\(openTodos.count) 待办 · \(completedTodos.count) 已完成")
+            Text("\(openTodos.count) open · \(completedTodos.count) done")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
             Spacer()
 
             Button {
+                addGroup()
+            } label: {
+                Label("New Group", systemImage: "folder.badge.plus")
+            }
+            .disabled(!isOpen)
+
+            Button {
+                addTodo()
+            } label: {
+                Label("New Task", systemImage: "plus")
+            }
+            .disabled(!isOpen)
+
+            Button {
                 isDoneColumnOpen.toggle()
             } label: {
-                Label(isDoneColumnOpen ? "隐藏已完成" : "显示已完成", systemImage: isDoneColumnOpen ? "sidebar.right" : "sidebar.leading")
+                Label(isDoneColumnOpen ? "Hide Done" : "Show Done", systemImage: isDoneColumnOpen ? "sidebar.right" : "sidebar.leading")
             }
             .disabled(!isOpen)
 
             Button {
                 isOpen.toggle()
             } label: {
-                Label(isOpen ? "关闭待办" : "打开待办", systemImage: isOpen ? "chevron.down" : "chevron.up")
+                Label(isOpen ? "Close Tasks" : "Open Tasks", systemImage: isOpen ? "chevron.down" : "chevron.up")
             }
         }
         .buttonStyle(.bordered)
@@ -85,49 +134,142 @@ struct WorkspaceTodoBoardView: View {
                 let todoWidth = availableWidth * ratio
 
                 HStack(spacing: 0) {
-                    todoColumn(
-                        title: "待办",
-                        systemImage: "circle",
-                        items: openTodos,
-                        emptyText: "暂无待办"
-                    )
-                    .frame(width: todoWidth)
+                    openTaskArea
+                        .frame(width: todoWidth)
 
                     splitDivider(availableWidth: availableWidth)
                         .frame(width: dividerWidth)
 
-                    todoColumn(
-                        title: "已完成",
-                        systemImage: "checkmark.circle",
-                        items: completedTodos,
-                        emptyText: "暂无已完成事项"
-                    )
-                    .frame(width: availableWidth - todoWidth)
+                    doneColumn
+                        .frame(width: availableWidth - todoWidth)
                 }
             } else {
-                todoColumn(
-                    title: "待办",
-                    systemImage: "circle",
-                    items: openTodos,
-                    emptyText: "暂无待办"
-                )
+                openTaskArea
             }
         }
     }
 
-    private func todoColumn(title: String, systemImage: String, items: [WorkspaceTodoModel], emptyText: String) -> some View {
+    private var openTaskArea: some View {
+        HStack(spacing: 10) {
+            groupList
+                .frame(width: 180)
+            Divider()
+            taskList(
+                title: selectedGroup?.title ?? defaultTodoGroupTitle,
+                items: selectedOpenTodos,
+                emptyText: "No tasks in this group"
+            )
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+    }
+
+    private var groupList: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Label(title, systemImage: systemImage)
+            HStack {
+                Label("Groups", systemImage: "folder")
                     .font(.subheadline.weight(.semibold))
                 Spacer()
-                if title == "待办" {
-                    addTodoField
+                Button(action: addGroup) {
+                    Image(systemName: "plus")
                 }
+                .buttonStyle(.plain)
+                .help("New group")
+            }
+
+            ScrollView {
+                LazyVStack(spacing: 6) {
+                    ForEach(orderedGroups) { group in
+                        groupRow(group)
+                    }
+                }
+                .padding(.trailing, 4)
+            }
+        }
+    }
+
+    private func groupRow(_ group: WorkspaceTodoGroupModel) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: group.isPinned ? "pin.fill" : "folder")
+                .foregroundStyle(group.isPinned ? Color.accentColor : Color.secondary)
+                .frame(width: 16)
+
+            if editingGroupId == group.id {
+                TextField("Group name", text: Binding(
+                    get: { group.title },
+                    set: {
+                        group.title = $0
+                        group.updatedAt = .now
+                    }
+                ))
+                .textFieldStyle(.plain)
+                .onSubmit {
+                    editingGroupId = nil
+                    save(status: "Renamed group")
+                }
+            } else {
+                Text(group.title)
+                    .lineLimit(1)
+                    .onTapGesture(count: 2) {
+                        editingGroupId = group.id
+                    }
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background((selectedGroup?.id == group.id ? Color.accentColor.opacity(0.16) : Color.clear))
+        .clipShape(RoundedRectangle(cornerRadius: 7))
+        .contentShape(Rectangle())
+        .onTapGesture {
+            selectedGroupId = group.id
+        }
+        .draggable("group:\(group.id)")
+        .dropDestination(for: String.self) { values, _ in
+            guard let value = values.first else { return false }
+            if let movingID = value.removingPrefix("group:") {
+                moveGroup(id: movingID, to: group.id)
+                return true
+            }
+            return false
+        }
+        .contextMenu {
+            Button(group.isPinned ? "Unpin Group" : "Pin Group") {
+                group.isPinned.toggle()
+                group.updatedAt = .now
+                save(status: group.isPinned ? "Pinned group" : "Unpinned group")
+            }
+            Button("Rename Group") {
+                editingGroupId = group.id
+            }
+            Button(role: .destructive) {
+                deleteGroup(group)
+            } label: {
+                Text("Delete Group")
+            }
+            .disabled(group.title == defaultTodoGroupTitle && groups.count <= 1)
+        }
+    }
+
+    private func taskList(title: String, items: [WorkspaceTodoModel], emptyText: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                Spacer()
+                Button(action: addTodo) {
+                    Image(systemName: "plus")
+                }
+                .buttonStyle(.plain)
+                .help("New task")
             }
 
             if items.isEmpty {
-                ContentUnavailableView(emptyText, systemImage: systemImage)
+                Text(emptyText)
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
@@ -140,24 +282,12 @@ struct WorkspaceTodoBoardView: View {
                 }
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
     }
 
-    private var addTodoField: some View {
-        HStack(spacing: 6) {
-            TextField("新增待办", text: $draftTitle)
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 180)
-                .onSubmit(addTodo)
-
-            Button(action: addTodo) {
-                Image(systemName: "plus")
-                    .frame(width: 18, height: 18)
-            }
-            .disabled(draftTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            .help("新增待办")
-        }
+    private var doneColumn: some View {
+        taskList(title: "Done", items: completedTodos, emptyText: "No completed tasks")
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
     }
 
     private func todoRow(_ todo: WorkspaceTodoModel) -> some View {
@@ -171,32 +301,78 @@ struct WorkspaceTodoBoardView: View {
             }
             .buttonStyle(.plain)
 
-            TextField("待办事项", text: Binding(
-                get: { todo.title },
-                set: { newValue in
-                    todo.title = newValue
-                    todo.updatedAt = .now
-                    try? modelContext.save()
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 4) {
+                    if todo.isPinned {
+                        Image(systemName: "pin.fill")
+                            .font(.caption2)
+                            .foregroundStyle(Color.accentColor)
+                    }
+                    Text(todo.title)
+                        .lineLimit(1)
+                        .strikethrough(todo.isCompleted)
                 }
-            ))
-            .textFieldStyle(.plain)
-            .strikethrough(todo.isCompleted)
-            .foregroundStyle(todo.isCompleted ? .secondary : .primary)
 
-            Button(role: .destructive) {
-                delete(todo)
+                HStack(spacing: 8) {
+                    if let dueAt = todo.dueAt {
+                        Label(dueAt.formatted(date: .abbreviated, time: .omitted), systemImage: "calendar")
+                    }
+                    if let resource = linkedResource(for: todo) {
+                        Label(resource.displayName, systemImage: resource.targetType == .folder ? "folder" : "doc")
+                    }
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            }
+
+            Spacer()
+
+            Button {
+                editingTodo = todo
             } label: {
-                Image(systemName: "trash")
+                Image(systemName: "info.circle")
                     .frame(width: 18, height: 18)
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
-            .help("删除")
+            .help("Edit details")
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
         .background(.background.opacity(0.55))
         .clipShape(RoundedRectangle(cornerRadius: 7))
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) {
+            editingTodo = todo
+        }
+        .draggable("todo:\(todo.id)")
+        .dropDestination(for: String.self) { values, _ in
+            guard let value = values.first else { return false }
+            if let movingID = value.removingPrefix("todo:") {
+                moveTodo(id: movingID, to: todo.id)
+                return true
+            }
+            return false
+        }
+        .contextMenu {
+            Button("Edit Details") {
+                editingTodo = todo
+            }
+            Button(todo.isPinned ? "Unpin Task" : "Pin Task") {
+                todo.isPinned.toggle()
+                todo.updatedAt = .now
+                save(status: todo.isPinned ? "Pinned task" : "Unpinned task")
+            }
+            Button(todo.isCompleted ? "Move Back To Open" : "Mark Done") {
+                toggle(todo)
+            }
+            Button(role: .destructive) {
+                delete(todo)
+            } label: {
+                Text("Delete Task")
+            }
+        }
     }
 
     private func splitDivider(availableWidth: Double) -> some View {
@@ -221,39 +397,131 @@ struct WorkspaceTodoBoardView: View {
                         dragStartRatio = nil
                     }
             )
-            .help("拖动调整待办和已完成的宽度")
+            .help("Drag to resize open and done columns")
+    }
+
+    @discardableResult
+    private func ensureDefaultGroup() -> WorkspaceTodoGroupModel {
+        if let existing = groups.first(where: { $0.title == defaultTodoGroupTitle }) {
+            return existing
+        }
+        let group = WorkspaceTodoGroupModel(workspaceId: workspaceId, title: defaultTodoGroupTitle, sortIndex: nextGroupSortIndex())
+        modelContext.insert(group)
+        try? modelContext.save()
+        return group
+    }
+
+    private func addGroup() {
+        let group = WorkspaceTodoGroupModel(workspaceId: workspaceId, title: "New Group", sortIndex: nextGroupSortIndex())
+        modelContext.insert(group)
+        selectedGroupId = group.id
+        editingGroupId = group.id
+        save(status: "Added group")
     }
 
     private func addTodo() {
-        let title = draftTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !title.isEmpty else { return }
-
+        let group = selectedGroup ?? ensureDefaultGroup()
         let todo = WorkspaceTodoModel(
             workspaceId: workspaceId,
-            title: title,
-            sortIndex: nextSortIndex(isCompleted: false)
+            groupId: group.id,
+            title: "New Task",
+            sortIndex: nextTodoSortIndex(groupId: group.id, isCompleted: false)
         )
         modelContext.insert(todo)
-        draftTitle = ""
-        save(status: "Added todo")
+        save(status: "Added task")
+        editingTodo = todo
     }
 
     private func toggle(_ todo: WorkspaceTodoModel) {
         todo.isCompleted.toggle()
         todo.completedAt = todo.isCompleted ? .now : nil
-        todo.sortIndex = nextSortIndex(isCompleted: todo.isCompleted)
+        todo.sortIndex = nextTodoSortIndex(groupId: todo.groupId, isCompleted: todo.isCompleted)
         todo.updatedAt = .now
-        save(status: todo.isCompleted ? "Marked todo complete" : "Moved todo back")
+        save(status: todo.isCompleted ? "Marked task done" : "Moved task back")
     }
 
     private func delete(_ todo: WorkspaceTodoModel) {
         modelContext.delete(todo)
-        save(status: "Deleted todo")
+        save(status: "Deleted task")
     }
 
-    private func nextSortIndex(isCompleted: Bool) -> Int {
-        let matching = todos.filter { $0.isCompleted == isCompleted }
+    private func deleteGroup(_ group: WorkspaceTodoGroupModel) {
+        let fallback = ensureDefaultGroup()
+        for todo in todos where todo.groupId == group.id {
+            todo.groupId = fallback.id == group.id ? nil : fallback.id
+            todo.updatedAt = .now
+        }
+        if selectedGroupId == group.id {
+            selectedGroupId = fallback.id == group.id ? orderedGroups.first { $0.id != group.id }?.id : fallback.id
+        }
+        if group.id != fallback.id {
+            modelContext.delete(group)
+        }
+        save(status: "Deleted group")
+    }
+
+    private func moveGroup(id movingID: String, to targetID: String) {
+        let moved = TodoBoardOrdering.movedIDs(orderedGroups.map(\.id), moving: movingID, to: targetID)
+        renumberGroups(ids: moved)
+        save(status: "Reordered groups")
+    }
+
+    private func moveTodo(id movingID: String, to targetID: String) {
+        guard let movingTodo = todos.first(where: { $0.id == movingID }),
+              let targetTodo = todos.first(where: { $0.id == targetID }) else {
+            return
+        }
+        movingTodo.groupId = targetTodo.groupId
+        movingTodo.isCompleted = targetTodo.isCompleted
+        let targetGroupID = groupId(for: targetTodo)
+        movingTodo.groupId = targetGroupID
+        let visibleIDs = orderedTodos(todos.filter { $0.isCompleted == targetTodo.isCompleted && groupId(for: $0) == targetGroupID }).map(\.id)
+        let moved = TodoBoardOrdering.movedIDs(visibleIDs, moving: movingID, to: targetID)
+        renumberTodos(ids: moved)
+        save(status: "Reordered tasks")
+    }
+
+    private func renumberGroups(ids: [String]) {
+        for (index, id) in ids.enumerated() {
+            guard let group = groups.first(where: { $0.id == id }) else { continue }
+            group.sortIndex = index
+            group.updatedAt = .now
+        }
+    }
+
+    private func renumberTodos(ids: [String]) {
+        for (index, id) in ids.enumerated() {
+            guard let todo = todos.first(where: { $0.id == id }) else { continue }
+            todo.sortIndex = index
+            todo.updatedAt = .now
+        }
+    }
+
+    private func orderedTodos(_ items: [WorkspaceTodoModel]) -> [WorkspaceTodoModel] {
+        let records = items.map {
+            TodoBoardOrderRecord(id: $0.id, title: $0.title, isPinned: $0.isPinned, sortIndex: $0.sortIndex)
+        }
+        let orderedIDs = TodoBoardOrdering.ordered(records).map(\.id)
+        let byID = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
+        return orderedIDs.compactMap { byID[$0] }
+    }
+
+    private func nextGroupSortIndex() -> Int {
+        (groups.map(\.sortIndex).max() ?? -1) + 1
+    }
+
+    private func nextTodoSortIndex(groupId: String?, isCompleted: Bool) -> Int {
+        let matching = todos.filter { self.groupId(for: $0) == groupId && $0.isCompleted == isCompleted }
         return (matching.map(\.sortIndex).max() ?? -1) + 1
+    }
+
+    private func groupId(for todo: WorkspaceTodoModel) -> String? {
+        todo.groupId ?? groups.first(where: { $0.title == defaultTodoGroupTitle })?.id
+    }
+
+    private func linkedResource(for todo: WorkspaceTodoModel) -> ResourcePinModel? {
+        guard let linkedResourceId = todo.linkedResourceId else { return nil }
+        return resources.first { $0.id == linkedResourceId }
     }
 
     private func save(status: String) {
@@ -264,5 +532,95 @@ struct WorkspaceTodoBoardView: View {
             modelContext.rollback()
             onStatus(error.localizedDescription)
         }
+    }
+}
+
+private struct WorkspaceTodoDetailView: View {
+    @Environment(\.dismiss) private var dismiss
+    let todo: WorkspaceTodoModel
+    let resources: [ResourcePinModel]
+    let onSave: () -> Void
+
+    @State private var title: String
+    @State private var details: String
+    @State private var createdAt: Date
+    @State private var hasDueDate: Bool
+    @State private var dueAt: Date
+    @State private var linkedResourceId: String
+
+    init(todo: WorkspaceTodoModel, resources: [ResourcePinModel], onSave: @escaping () -> Void) {
+        self.todo = todo
+        self.resources = resources
+        self.onSave = onSave
+        _title = State(initialValue: todo.title)
+        _details = State(initialValue: todo.details)
+        _createdAt = State(initialValue: todo.createdAt)
+        _hasDueDate = State(initialValue: todo.dueAt != nil)
+        _dueAt = State(initialValue: todo.dueAt ?? .now)
+        _linkedResourceId = State(initialValue: todo.linkedResourceId ?? "")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Task Details")
+                .font(.title3.weight(.semibold))
+
+            TextField("Title", text: $title)
+                .textFieldStyle(.roundedBorder)
+
+            Text("Details")
+                .font(.subheadline.weight(.semibold))
+            TextEditor(text: $details)
+                .frame(minHeight: 120)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(.quaternary)
+                }
+
+            DatePicker("Created", selection: $createdAt, displayedComponents: [.date])
+
+            Toggle("Use DDL Date", isOn: $hasDueDate)
+            if hasDueDate {
+                DatePicker("DDL", selection: $dueAt, displayedComponents: [.date])
+            }
+
+            Picker("Linked Resource", selection: $linkedResourceId) {
+                Text("None").tag("")
+                ForEach(resources) { resource in
+                    Text(resource.displayName).tag(resource.id)
+                }
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel") {
+                    dismiss()
+                }
+                Button("Save") {
+                    save()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 460)
+    }
+
+    private func save() {
+        todo.title = title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Untitled Task" : title.trimmingCharacters(in: .whitespacesAndNewlines)
+        todo.details = details
+        todo.createdAt = createdAt
+        todo.dueAt = hasDueDate ? dueAt : nil
+        todo.linkedResourceId = linkedResourceId.isEmpty ? nil : linkedResourceId
+        todo.updatedAt = .now
+        onSave()
+        dismiss()
+    }
+}
+
+private extension String {
+    func removingPrefix(_ prefix: String) -> String? {
+        guard hasPrefix(prefix) else { return nil }
+        return String(dropFirst(prefix.count))
     }
 }
