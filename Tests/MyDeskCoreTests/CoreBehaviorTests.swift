@@ -265,6 +265,25 @@ final class CoreBehaviorTests: XCTestCase {
         XCTAssertEqual(decoded.edges.first?.targetArrow, "arrow")
     }
 
+    func testCanvasNodeColorStyleParsesHexInputs() {
+        XCTAssertEqual(CanvasNodeColorStyle(rawValue: "#38bdf8")?.normalizedRawValue, "#38BDF8FF")
+        XCTAssertEqual(CanvasNodeColorStyle(rawValue: "38bdf880")?.normalizedRawValue, "#38BDF880")
+        XCTAssertEqual(CanvasNodeColorStyle(rawValue: "#fb3")?.normalizedRawValue, "#FFBB33FF")
+    }
+
+    func testCanvasNodeColorStyleUpdatesOpacityWithoutChangingColor() throws {
+        let style = try XCTUnwrap(CanvasNodeColorStyle(rawValue: "#38BDF8"))
+        XCTAssertEqual(style.withOpacity(0.42).normalizedRawValue, "#38BDF86B")
+        XCTAssertEqual(style.withOpacity(-1).normalizedRawValue, "#38BDF800")
+        XCTAssertEqual(style.withOpacity(2).normalizedRawValue, "#38BDF8FF")
+    }
+
+    func testCanvasNodeColorStyleRejectsInvalidInput() {
+        XCTAssertNil(CanvasNodeColorStyle(rawValue: "blue"))
+        XCTAssertNil(CanvasNodeColorStyle(rawValue: "#12"))
+        XCTAssertNil(CanvasNodeColorStyle(rawValue: "#zzzzzz"))
+    }
+
     func testResourceLibraryFilteringKeepsGlobalSourcesSeparateFromPinnedShortcuts() {
         let records = [
             ResourceLibraryRecord(id: "folder-source", targetType: "folder", title: "Projects", originalName: "Projects", customName: "", displayPath: "/Users/me/Projects", isPinned: false, updatedAt: Date(timeIntervalSince1970: 10), sortIndex: 0),

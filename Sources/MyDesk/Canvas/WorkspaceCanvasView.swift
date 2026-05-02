@@ -528,6 +528,8 @@ struct WorkspaceCanvasView: View {
                         onCopy: { performCardButtonAction(node) { copyNodePayload(node) } },
                         onConnect: { performCardButtonAction(node) { connectButtonTapped(node) } },
                         onDelete: { performCardButtonAction(node) { delete(node) } },
+                        onColorControlActivate: { performCardButtonAction(node) {} },
+                        onColorChange: { updateNodeColor(node, to: $0) },
                         onTitleChange: { updateNodeTitle(node, to: $0) },
                         onNoteChange: { updateNodeBody(node, to: $0) }
                     )
@@ -577,6 +579,8 @@ struct WorkspaceCanvasView: View {
                         onConnect: { performCardButtonAction(node) { connectButtonTapped(node) } },
                         onToggleNote: { performCardButtonAction(node) { toggleNote(for: node) } },
                         onDelete: { performCardButtonAction(node) { delete(node) } },
+                        onColorControlActivate: { performCardButtonAction(node) {} },
+                        onColorChange: { updateNodeColor(node, to: $0) },
                         onTitleChange: { updateNodeTitle(node, to: $0) },
                         onNoteChange: { updateNodeBody(node, to: $0) }
                     )
@@ -1518,6 +1522,15 @@ struct WorkspaceCanvasView: View {
         try? modelContext.save()
     }
 
+    private func updateNodeColor(_ node: CanvasNodeModel, to rawValue: String) {
+        let normalized = CanvasNodeColorStyle(rawValue: rawValue)?.normalizedRawValue ?? ""
+        guard node.accentColorRaw != normalized else { return }
+        node.accentColorRaw = normalized
+        node.updatedAt = .now
+        try? modelContext.save()
+        onStatus(normalized.isEmpty ? "Reset card color" : "Updated card color")
+    }
+
     private func createAliasForSelectedNode() {
         guard let resource = selectedResource else { return }
         let resolved = BookmarkService().resolveBookmark(resource.securityScopedBookmarkData, fallbackPath: resource.lastResolvedPath)
@@ -1748,6 +1761,183 @@ struct WorkspaceCanvasView: View {
     }
 }
 
+private extension CanvasNodeColorStyle {
+    var cardFill: Color {
+        Color(red: red, green: green, blue: blue).opacity(opacity)
+    }
+
+    var pickerColor: Color {
+        Color(red: red, green: green, blue: blue)
+    }
+
+    static func fromPickerColor(_ color: Color, opacity: Double) -> CanvasNodeColorStyle? {
+        guard let nsColor = NSColor(color).usingColorSpace(.deviceRGB) else { return nil }
+        return CanvasNodeColorStyle(
+            red: Double(nsColor.redComponent),
+            green: Double(nsColor.greenComponent),
+            blue: Double(nsColor.blueComponent),
+            opacity: opacity
+        )
+    }
+}
+
+private struct CanvasCardColorControl: View {
+    let styleRaw: String
+    let onActivate: () -> Void
+    let onStyleChange: (String) -> Void
+    @State private var isPresented = false
+
+    private var style: CanvasNodeColorStyle? {
+        CanvasNodeColorStyle(rawValue: styleRaw)
+    }
+
+    var body: some View {
+        Button {
+            onActivate()
+            isPresented.toggle()
+        } label: {
+            ZStack {
+                CanvasSharpSymbol(systemName: "paintpalette", pointSize: 12, weight: .semibold)
+                    .frame(width: 13, height: 13)
+                if let style {
+                    Circle()
+                        .fill(style.cardFill)
+                        .frame(width: 8, height: 8)
+                        .offset(x: 5, y: 5)
+                }
+            }
+        }
+        .buttonStyle(CardIconButtonStyle(isActive: style != nil))
+        .help("Card color")
+        .popover(isPresented: $isPresented, arrowEdge: .bottom) {
+            CanvasCardColorEditor(styleRaw: styleRaw, onStyleChange: onStyleChange)
+        }
+    }
+}
+
+private struct CanvasCardColorEditor: View {
+    let styleRaw: String
+    let onStyleChange: (String) -> Void
+    @State private var pickerColor = Color.accentColor
+    @State private var opacity = 0.82
+    @State private var colorCode = ""
+    @State private var hasInvalidCode = false
+
+    private var style: CanvasNodeColorStyle? {
+        CanvasNodeColorStyle(rawValue: styleRaw)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Card Color")
+                    .font(.headline)
+                Spacer()
+                Button("Reset") {
+                    onStyleChange("")
+                    syncFromRawValue("")
+                }
+                .buttonStyle(.borderless)
+            }
+
+            LazyVGrid(columns: Array(repeating: GridItem(.fixed(24), spacing: 8), count: 6), spacing: 8) {
+                ForEach(CanvasNodeColorPreset.common) { preset in
+                    Button {
+                        apply(preset.style)
+                    } label: {
+                        Circle()
+                            .fill(preset.style.cardFill)
+                            .frame(width: 20, height: 20)
+                            .overlay {
+                                Circle()
+                                    .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
+                            }
+                    }
+                    .buttonStyle(.plain)
+                    .help(preset.title)
+                }
+            }
+
+            ColorPicker("Custom", selection: $pickerColor, supportsOpacity: false)
+                .onChange(of: pickerColor) { _, newValue in
+                    guard let style = CanvasNodeColorStyle.fromPickerColor(newValue, opacity: opacity) else { return }
+                    apply(style)
+                }
+
+            HStack(spacing: 8) {
+                TextField("#RRGGBB", text: $colorCode)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+                    .onSubmit(applyColorCode)
+                    .overlay {
+                        if hasInvalidCode {
+                            RoundedRectangle(cornerRadius: 5)
+                                .stroke(Color.red.opacity(0.6), lineWidth: 1)
+                        }
+                    }
+                Button("Apply", action: applyColorCode)
+            }
+
+            HStack(spacing: 10) {
+                Text("Opacity")
+                Slider(value: $opacity, in: 0...1) { editing in
+                    if !editing {
+                        applyOpacity()
+                    }
+                }
+                Text("\(Int((opacity * 100).rounded()))%")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 38, alignment: .trailing)
+            }
+        }
+        .padding(14)
+        .frame(width: 260)
+        .onAppear {
+            syncFromRawValue(styleRaw)
+        }
+        .onChange(of: styleRaw) { _, newValue in
+            syncFromRawValue(newValue)
+        }
+    }
+
+    private func applyColorCode() {
+        guard let parsed = CanvasNodeColorStyle(rawValue: colorCode) else {
+            hasInvalidCode = true
+            return
+        }
+        apply(parsed)
+    }
+
+    private func applyOpacity() {
+        let baseStyle = style ?? CanvasNodeColorStyle.fromPickerColor(pickerColor, opacity: opacity)
+        guard let baseStyle else { return }
+        apply(baseStyle.withOpacity(opacity))
+    }
+
+    private func apply(_ style: CanvasNodeColorStyle) {
+        hasInvalidCode = false
+        pickerColor = style.pickerColor
+        opacity = style.opacity
+        colorCode = style.normalizedRawValue
+        onStyleChange(style.normalizedRawValue)
+    }
+
+    private func syncFromRawValue(_ rawValue: String) {
+        guard let style = CanvasNodeColorStyle(rawValue: rawValue) else {
+            pickerColor = Color.accentColor
+            opacity = 0.82
+            colorCode = ""
+            hasInvalidCode = false
+            return
+        }
+        pickerColor = style.pickerColor
+        opacity = style.opacity
+        colorCode = style.normalizedRawValue
+        hasInvalidCode = false
+    }
+}
+
 struct CanvasNodeCard: View {
     let node: CanvasNodeModel
     let resource: ResourcePinModel?
@@ -1764,6 +1954,8 @@ struct CanvasNodeCard: View {
     let onConnect: () -> Void
     let onToggleNote: () -> Void
     let onDelete: () -> Void
+    let onColorControlActivate: () -> Void
+    let onColorChange: (String) -> Void
     let onTitleChange: (String) -> Void
     let onNoteChange: (String) -> Void
     @State private var feedback: String?
@@ -1817,7 +2009,7 @@ struct CanvasNodeCard: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(.regularMaterial)
+        .background(resourceCardBackground)
         .overlay {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(borderColor, lineWidth: isSelected || isConnectionSource ? 2 : 1)
@@ -1843,7 +2035,7 @@ struct CanvasNodeCard: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(noteBackground)
+        .background(noteCardBackground)
         .overlay {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(noteBorderColor, lineWidth: isSelected || isConnectionSource ? 2 : 1.2)
@@ -1866,6 +2058,7 @@ struct CanvasNodeCard: View {
             )
             .frame(width: chromeTextWidth(subtitle, fontSize: 12.5, weight: .semibold), height: 16, alignment: .leading)
             Spacer(minLength: 6)
+            CanvasCardColorControl(styleRaw: node.accentColorRaw, onActivate: onColorControlActivate, onStyleChange: onColorChange)
             Button {
                 triggerFeedback("Copied") {
                     onCopy()
@@ -2070,9 +2263,37 @@ struct CanvasNodeCard: View {
         Color(red: 1.0, green: 0.94, blue: 0.62).opacity(0.72)
     }
 
+    @ViewBuilder
+    private var resourceCardBackground: some View {
+        RoundedRectangle(cornerRadius: 8)
+            .fill(.regularMaterial)
+        if let colorStyle {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(colorStyle.cardFill)
+        }
+    }
+
+    @ViewBuilder
+    private var noteCardBackground: some View {
+        if let colorStyle {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(colorStyle.cardFill)
+        } else {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(noteBackground)
+        }
+    }
+
+    private var colorStyle: CanvasNodeColorStyle? {
+        CanvasNodeColorStyle(rawValue: node.accentColorRaw)
+    }
+
     private var noteBorderColor: Color {
         if isConnectionSource || isSelected {
             return .accentColor
+        }
+        if let colorStyle {
+            return colorStyle.cardFill.opacity(0.9)
         }
         return Color(red: 0.86, green: 0.64, blue: 0.14).opacity(0.48)
     }
@@ -2647,6 +2868,8 @@ struct CanvasFrameCard: View {
     let onCopy: () -> Void
     let onConnect: () -> Void
     let onDelete: () -> Void
+    let onColorControlActivate: () -> Void
+    let onColorChange: (String) -> Void
     let onTitleChange: (String) -> Void
     let onNoteChange: (String) -> Void
     @State private var feedback: String?
@@ -2662,6 +2885,7 @@ struct CanvasFrameCard: View {
                         .font(.headline)
                         .lineLimit(1)
                     Spacer()
+                    CanvasCardColorControl(styleRaw: node.accentColorRaw, onActivate: onColorControlActivate, onStyleChange: onColorChange)
                     Button {
                         triggerFeedback("Copied") {
                             onCopy()
@@ -2693,7 +2917,7 @@ struct CanvasFrameCard: View {
                 Spacer()
             }
             .padding(12)
-            .background(Color.accentColor.opacity(0.045))
+            .background(frameBackground)
             .overlay {
                 RoundedRectangle(cornerRadius: 8)
                     .stroke(borderColor, style: StrokeStyle(lineWidth: isSelected || isConnectionSource ? 2 : 1.4, dash: [8, 5]))
@@ -2739,6 +2963,21 @@ struct CanvasFrameCard: View {
             return .accentColor
         }
         return isSelected ? .accentColor : Color.secondary.opacity(0.45)
+    }
+
+    @ViewBuilder
+    private var frameBackground: some View {
+        if let colorStyle {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(colorStyle.cardFill)
+        } else {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.accentColor.opacity(0.045))
+        }
+    }
+
+    private var colorStyle: CanvasNodeColorStyle? {
+        CanvasNodeColorStyle(rawValue: node.accentColorRaw)
     }
 
     private var titleBinding: Binding<String> {
