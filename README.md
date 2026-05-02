@@ -5,6 +5,10 @@
 [![简体中文](https://img.shields.io/badge/语言-简体中文-1677ff)](#中文)
 [![English](https://img.shields.io/badge/Language-English-24292f)](#english)
 
+<p align="center">
+  <img src="Sources/MyDesk/Resources/AppIcon.png" alt="MyDesk logo" width="128">
+</p>
+
 ![Platform](https://img.shields.io/badge/platform-macOS%2014%2B-111827)
 ![Swift](https://img.shields.io/badge/Swift-6.0-F05138)
 ![UI](https://img.shields.io/badge/UI-SwiftUI-0A84FF)
@@ -213,6 +217,7 @@ Highlights:
 - Safer resource import deduplication across global and workspace scopes.
 - Canvas resource menus that can add global, current-workspace, and other-workspace resources.
 - Refined navigation titles, detail layout, status bar spacing, and README release guidance.
+- Added the new MyDesk logo to the README and release documentation.
 
 Full release notes are available in [`docs/releases/v1.3.0.md`](docs/releases/v1.3.0.md).
 
@@ -443,6 +448,7 @@ dist/release/MyDesk-v1.3.0-macOS/artifacts/
 - 修复资源导入去重逻辑，避免全局资源和工作区资源因为相同路径被错误合并。
 - Canvas 添加资源时可以从全局库、当前 Workspace 和其他 Workspace 的资源分组中选择。
 - 改进导航标题、详情页布局、底部状态栏密度和 README 发布说明。
+- 在 README 和更新说明中加入新的 MyDesk logo 说明。
 
 完整更新内容见 [`docs/releases/v1.3.0.md`](docs/releases/v1.3.0.md)。
 
