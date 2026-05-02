@@ -18,6 +18,7 @@ struct ContentView: View {
     @Query(sort: \WorkspaceModel.updatedAt, order: .reverse) private var workspaces: [WorkspaceModel]
     @Query(sort: \ResourcePinModel.updatedAt, order: .reverse) private var resources: [ResourcePinModel]
     @Query(sort: \SnippetModel.updatedAt, order: .reverse) private var snippets: [SnippetModel]
+    @Query(sort: \WorkspaceTodoModel.updatedAt, order: .reverse) private var todos: [WorkspaceTodoModel]
     @Query private var canvases: [CanvasModel]
     @Query private var nodes: [CanvasNodeModel]
     @Query private var edges: [CanvasEdgeModel]
@@ -411,6 +412,7 @@ struct ContentView: View {
                     workspace: workspace,
                     resources: resources,
                     snippets: snippets,
+                    todos: todos,
                     canvases: canvases,
                     nodes: nodes,
                     edges: edges,
@@ -655,6 +657,7 @@ struct ContentView: View {
             let nodeIds = Set(workspaceNodes.map(\.id))
             let workspaceResources = resources.filter { $0.scope == .workspace && $0.workspaceId == workspace.id }
             let workspaceSnippets = snippets.filter { $0.scope == .workspace && $0.workspaceId == workspace.id }
+            let workspaceTodos = todos.filter { $0.workspaceId == workspace.id }
             let deletedResourceIds = Set(workspaceResources.map(\.id))
             let deletedSnippetIds = Set(workspaceSnippets.map(\.id))
 
@@ -675,6 +678,9 @@ struct ContentView: View {
             }
             for snippet in workspaceSnippets {
                 modelContext.delete(snippet)
+            }
+            for todo in workspaceTodos {
+                modelContext.delete(todo)
             }
             modelContext.delete(workspace)
             try modelContext.save()
@@ -1384,6 +1390,7 @@ struct WorkspaceDetailView: View {
     let workspace: WorkspaceModel
     let resources: [ResourcePinModel]
     let snippets: [SnippetModel]
+    let todos: [WorkspaceTodoModel]
     let canvases: [CanvasModel]
     let nodes: [CanvasNodeModel]
     let edges: [CanvasEdgeModel]
@@ -1415,6 +1422,10 @@ struct WorkspaceDetailView: View {
 
     private var workspaceSnippets: [SnippetModel] {
         snippets.filter { $0.scope == .global || $0.workspaceId == workspace.id }
+    }
+
+    private var workspaceTodos: [WorkspaceTodoModel] {
+        todos.filter { $0.workspaceId == workspace.id }
     }
 
     private var workspaceCanvas: CanvasModel? {
@@ -1466,6 +1477,7 @@ struct WorkspaceDetailView: View {
                         canvas: canvas,
                         resources: workspaceResources,
                         snippets: workspaceSnippets,
+                        todos: workspaceTodos,
                         nodes: nodes.filter { $0.canvasId == canvas.id },
                         edges: edges.filter { $0.canvasId == canvas.id },
                         onStatus: onStatus,

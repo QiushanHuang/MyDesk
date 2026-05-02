@@ -179,9 +179,13 @@ struct WorkspaceCanvasView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage(AppPreferenceKeys.canvasScrollZoomDirection) private var scrollZoomDirectionRaw = CanvasScrollZoomDirection.scrollDownZoomsOut.rawValue
     @AppStorage(AppPreferenceKeys.canvasDefaultZoomPercent) private var canvasDefaultZoomPercent = CanvasZoomBaseline.defaultPercent
+    @AppStorage(AppPreferenceKeys.workspaceCanvasTodoPanelDefaultOpen) private var todoPanelDefaultOpen = true
+    @AppStorage(AppPreferenceKeys.workspaceCanvasTodoDoneColumnDefaultOpen) private var todoDoneColumnDefaultOpen = false
+    @AppStorage(AppPreferenceKeys.workspaceCanvasTodoDoneColumnOpen) private var isTodoDoneColumnOpen = false
     let canvas: CanvasModel
     let resources: [ResourcePinModel]
     let snippets: [SnippetModel]
+    let todos: [WorkspaceTodoModel]
     let nodes: [CanvasNodeModel]
     let edges: [CanvasEdgeModel]
     let onStatus: (String) -> Void
@@ -203,6 +207,8 @@ struct WorkspaceCanvasView: View {
     @State private var transientNodeSizes: [String: CGSize] = [:]
     @State private var resizingNodeId: String?
     @State private var isCanvasInspectorVisible = false
+    @State private var isTodoPanelOpen = true
+    @State private var isTodoPanelInitialized = false
     @State private var edgeControlDragStart: [String: CGPoint] = [:]
     @State private var transientEdgeControlPoints: [String: CGPoint] = [:]
     @State private var frameDragControlPointEdgeIDs: Set<String> = []
@@ -270,19 +276,38 @@ struct WorkspaceCanvasView: View {
     }
 
     var body: some View {
-        HStack(spacing: 12) {
-            canvasLeftRail
-                .frame(width: 196)
-            canvasSurface
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            if isCanvasInspectorVisible {
-                canvasRightRail
-                    .frame(width: 244)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
+        VStack(spacing: 10) {
+            HStack(spacing: 12) {
+                canvasLeftRail
+                    .frame(width: 196)
+                canvasSurface
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if isCanvasInspectorVisible {
+                    canvasRightRail
+                        .frame(width: 244)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
             }
+
+            WorkspaceTodoBoardView(
+                workspaceId: canvas.workspaceId,
+                todos: todos,
+                isOpen: $isTodoPanelOpen,
+                isDoneColumnOpen: $isTodoDoneColumnOpen,
+                onStatus: onStatus
+            )
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .animation(.easeInOut(duration: 0.16), value: isCanvasInspectorVisible)
+        .animation(.easeInOut(duration: 0.16), value: isTodoPanelOpen)
+        .animation(.easeInOut(duration: 0.16), value: isTodoDoneColumnOpen)
+        .onAppear {
+            if !isTodoPanelInitialized {
+                isTodoPanelOpen = todoPanelDefaultOpen
+                isTodoDoneColumnOpen = todoDoneColumnDefaultOpen
+                isTodoPanelInitialized = true
+            }
+        }
         .onChange(of: canvasDefaultZoomPercent) { _, _ in
             setZoom(zoomBaseline)
             onStatus("Canvas 100% baseline updated")
@@ -311,6 +336,16 @@ struct WorkspaceCanvasView: View {
                 .tint(isCanvasInspectorVisible ? .accentColor : nil)
                 .help(isCanvasInspectorVisible ? "Hide canvas inspector" : "Show canvas inspector")
             }
+
+            Button {
+                isTodoPanelOpen.toggle()
+            } label: {
+                Label(isTodoPanelOpen ? "Close Todo Page" : "Open Todo Page", systemImage: "checklist")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.bordered)
+            .tint(isTodoPanelOpen ? .accentColor : nil)
+            .help(isTodoPanelOpen ? "Close workspace todo page" : "Open workspace todo page")
 
             GroupBox("Add") {
                 VStack(alignment: .leading, spacing: 8) {

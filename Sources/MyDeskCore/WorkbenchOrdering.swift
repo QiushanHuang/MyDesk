@@ -1153,6 +1153,20 @@ public enum CanvasDropPlacement {
 public enum AppPreferenceKeys {
     public static let canvasScrollZoomDirection = "canvasScrollZoomDirection"
     public static let canvasDefaultZoomPercent = "canvasDefaultZoomPercent"
+    public static let workspaceCanvasTodoPanelDefaultOpen = "workspaceCanvasTodoPanelDefaultOpen"
+    public static let workspaceCanvasTodoDoneColumnDefaultOpen = "workspaceCanvasTodoDoneColumnDefaultOpen"
+    public static let workspaceCanvasTodoDoneColumnOpen = "workspaceCanvasTodoDoneColumnOpen"
+    public static let workspaceCanvasTodoColumnRatio = "workspaceCanvasTodoColumnRatio"
+}
+
+public enum TodoBoardColumnSplit {
+    public static let minimumRatio = 0.3
+    public static let maximumRatio = 0.7
+    public static let defaultRatio = 0.5
+
+    public static func clampedRatio(_ ratio: Double) -> Double {
+        min(max(ratio, minimumRatio), maximumRatio)
+    }
 }
 
 public enum CanvasScrollZoomDirection: String, CaseIterable, Identifiable, Sendable {

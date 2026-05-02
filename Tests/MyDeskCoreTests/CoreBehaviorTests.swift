@@ -200,6 +200,19 @@ final class CoreBehaviorTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(WorkbenchSidebarMetrics.maximumWidth, WorkbenchSidebarMetrics.idealWidth)
     }
 
+    func testWorkspaceCanvasTodoPreferenceKeysAreStable() {
+        XCTAssertEqual(AppPreferenceKeys.workspaceCanvasTodoPanelDefaultOpen, "workspaceCanvasTodoPanelDefaultOpen")
+        XCTAssertEqual(AppPreferenceKeys.workspaceCanvasTodoDoneColumnDefaultOpen, "workspaceCanvasTodoDoneColumnDefaultOpen")
+        XCTAssertEqual(AppPreferenceKeys.workspaceCanvasTodoDoneColumnOpen, "workspaceCanvasTodoDoneColumnOpen")
+        XCTAssertEqual(AppPreferenceKeys.workspaceCanvasTodoColumnRatio, "workspaceCanvasTodoColumnRatio")
+    }
+
+    func testTodoColumnSplitRatioIsClampedToUsableRange() {
+        XCTAssertEqual(TodoBoardColumnSplit.clampedRatio(-1), 0.3)
+        XCTAssertEqual(TodoBoardColumnSplit.clampedRatio(0.5), 0.5)
+        XCTAssertEqual(TodoBoardColumnSplit.clampedRatio(2), 0.7)
+    }
+
     func testManifestRoundTripKeepsSchemaVersion() throws {
         let manifest = ExportManifest(
             schemaVersion: 1,

@@ -241,6 +241,38 @@ final class SnippetModel {
 }
 
 @Model
+final class WorkspaceTodoModel {
+    @Attribute(.unique) var id: String
+    var workspaceId: String
+    var title: String
+    var isCompleted: Bool
+    var sortIndex: Int
+    var createdAt: Date
+    var updatedAt: Date
+    var completedAt: Date?
+
+    init(
+        id: String = UUID().uuidString,
+        workspaceId: String,
+        title: String,
+        isCompleted: Bool = false,
+        sortIndex: Int = 0,
+        createdAt: Date = .now,
+        updatedAt: Date = .now,
+        completedAt: Date? = nil
+    ) {
+        self.id = id
+        self.workspaceId = workspaceId
+        self.title = title
+        self.isCompleted = isCompleted
+        self.sortIndex = sortIndex
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.completedAt = completedAt
+    }
+}
+
+@Model
 final class CanvasModel {
     @Attribute(.unique) var id: String
     var workspaceId: String
